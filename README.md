@@ -1,10 +1,13 @@
 # SonLite
 
-Application Android de lecteur de musique locale avec téléchargeur audio intégré.
+Est ce que vous aussi vous aimeriez pouvoir écouter gratuitement vos musiques sans pubs et meme sans internet et sans aller sur des sites douteux pour télécharger vos musiques? Maintenant c'est possible grace a SonLite (j'avoue le nom c'est pas ouf mais on s'en fout) . 
+Vous n'avez plus besoin de faire 30 manipulations pour gerer vos fichiers et changer de son. On a pas réinventé la roue on a juste simplifié au maximum le système. 
+Et surtout niveau sécuritée: plus besoin d'aller sur des sites douteux pour télécharger vos sons, vous pouvez simplement coller un lien youtube d'un clip, d'une musique et meme d'un podcast et l'audio est téléchargé et ajouté a votre bibliothèque. Vous pouvez créer vos playlists personalisées sans limites. 
+Je vous pose ca la .
 
 ## Fonctionnalités
 
-- **Téléchargement audio** — colle une URL et l'audio est téléchargé en haute qualité
+- **Téléchargement audio** — colle une URL youtube et l'audio est téléchargé en haute qualité
 - **Lecteur local** — lit les fichiers audio stockés sur l'appareil
 - **Gestion de bibliothèque** — organise tes morceaux, albums et artistes
 - **Éditeur audio** — coupe et divise tes fichiers audio (trim / split)
@@ -55,3 +58,5 @@ L'APK est généré dans `build/app/outputs/flutter-apk/app-release.apk`.
 ## Licence
 
 Ce projet est distribué sous licence [MIT](LICENSE).
+
+Projet dévelopée a 40% avec Claude Code
