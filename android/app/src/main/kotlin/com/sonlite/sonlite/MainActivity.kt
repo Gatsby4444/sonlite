@@ -1,0 +1,202 @@
+package com.sonlite.sonlite
+
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import com.ryanheise.audioservice.AudioServiceFragmentActivity
+import com.yausername.ffmpeg.FFmpeg
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLRequest
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.MethodChannel
+
+class MainActivity : AudioServiceFragmentActivity() {
+
+    companion object {
+        private const val TAG = "SonLiteYtDlp"
+    }
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var progressSink: EventChannel.EventSink? = null
+
+    @Volatile
+    private var ytdlpInitialized = false
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        val messenger = flutterEngine.dartExecutor.binaryMessenger
+
+        EventChannel(messenger, "com.sonlite/ytdlp_progress")
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(args: Any?, sink: EventChannel.EventSink?) {
+                    progressSink = sink
+                }
+
+                override fun onCancel(args: Any?) {
+                    progressSink = null
+                }
+            })
+
+        MethodChannel(messenger, "com.sonlite/ffmpeg")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "execute" -> {
+                        val args = call.argument<List<String>>("args")!!
+                        Thread {
+                            try {
+                                ensureInitialized()
+                                val rc = runFFmpeg(args)
+                                mainHandler.post { result.success(rc) }
+                            } catch (e: Throwable) {
+                                Log.e(TAG, "ffmpeg execute: ÉCHEC", e)
+                                mainHandler.post { result.error("FFMPEG_ERROR", e.message, null) }
+                            }
+                        }.start()
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        MethodChannel(messenger, "com.sonlite/ytdlp")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "update" -> handleUpdate(result)
+                    "getInfo" -> handleGetInfo(call.argument<String>("url")!!, result)
+                    "download" -> handleDownload(
+                        call.argument<String>("url")!!,
+                        call.argument<String>("outputTemplate")!!,
+                        result,
+                    )
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    /// Exécute le binaire FFmpeg extrait par youtubedl-android.
+    /// Le chemin d'extraction de FFmpeg.init() est {noBackupFilesDir}/packages/ffmpeg/bin/ffmpeg.
+    private fun runFFmpeg(args: List<String>): Int {
+        val noBackup = applicationContext.getNoBackupFilesDir()
+        val ffmpegBin = java.io.File(noBackup, "packages/ffmpeg/bin/ffmpeg")
+        if (!ffmpegBin.exists()) {
+            throw IllegalStateException("FFmpeg binary not found at ${ffmpegBin.absolutePath} — init() may have failed")
+        }
+        val nativeLibDir = applicationInfo.nativeLibraryDir
+        val cmd = listOf(ffmpegBin.absolutePath) + args
+        Log.d(TAG, "ffmpeg: ${cmd.joinToString(" ")}")
+        val process = ProcessBuilder(cmd)
+            .redirectErrorStream(true)
+            .apply { environment()["LD_LIBRARY_PATH"] = nativeLibDir }
+            .start()
+        process.inputStream.bufferedReader().forEachLine { Log.d(TAG, "ffmpeg: $it") }
+        return process.waitFor()
+    }
+
+    /// Initialise yt-dlp + ffmpeg (extrait le runtime Python au premier appel).
+    /// Doit être appelé depuis un thread d'arrière-plan.
+    private fun ensureInitialized() {
+        if (ytdlpInitialized) return
+        synchronized(this) {
+            if (ytdlpInitialized) return
+            Log.i(TAG, "init: extraction du runtime Python (peut être long)...")
+            YoutubeDL.getInstance().init(applicationContext)
+            FFmpeg.getInstance().init(applicationContext)
+            ytdlpInitialized = true
+            Log.i(TAG, "init: terminé")
+        }
+    }
+
+    /// Met à jour yt-dlp vers la dernière version stable depuis GitHub.
+    private fun handleUpdate(result: MethodChannel.Result) {
+        Thread {
+            try {
+                Log.i(TAG, "update: initialisation...")
+                ensureInitialized()
+                Log.i(TAG, "update: téléchargement de la dernière version yt-dlp...")
+                val status = YoutubeDL.getInstance().updateYoutubeDL(
+                    applicationContext,
+                    YoutubeDL.UpdateChannel.STABLE,
+                )
+                Log.i(TAG, "update: terminé — $status")
+                mainHandler.post { result.success(status?.name ?: "UNKNOWN") }
+            } catch (e: Throwable) {
+                Log.e(TAG, "update: ÉCHEC", e)
+                mainHandler.post { result.error("UPDATE_ERROR", e.message, null) }
+            }
+        }.start()
+    }
+
+    private fun handleGetInfo(url: String, result: MethodChannel.Result) {
+        Thread {
+            try {
+                Log.i(TAG, "getInfo: initialisation...")
+                ensureInitialized()
+                Log.i(TAG, "getInfo: extraction des métadonnées de $url")
+                val info = YoutubeDL.getInstance().getInfo(url)
+                Log.i(TAG, "getInfo: OK — titre=${info.title}")
+                val map = mapOf(
+                    "title" to info.title,
+                    "duration" to info.duration,
+                    "thumbnail" to info.thumbnail,
+                    "uploader" to info.uploader,
+                    "id" to info.id,
+                )
+                mainHandler.post { result.success(map) }
+            } catch (e: Throwable) {
+                Log.e(TAG, "getInfo: ÉCHEC", e)
+                mainHandler.post { result.error("GETINFO_ERROR", e.message, null) }
+            }
+        }.start()
+    }
+
+    private fun handleDownload(
+        url: String,
+        outputTemplate: String,
+        result: MethodChannel.Result,
+    ) {
+        Thread {
+            try {
+                Log.i(TAG, "download: initialisation...")
+                ensureInitialized()
+                Log.i(TAG, "download: démarrage pour $url")
+                val request = YoutubeDLRequest(url)
+                request.addOption("-x")
+                request.addOption("--audio-format", "best")
+                request.addOption("--audio-quality", "0")
+                // --embed-thumbnail retiré : miniature téléchargée séparément côté Dart.
+                request.addOption("--no-playlist")
+                request.addOption("-o", outputTemplate)
+
+                YoutubeDL.getInstance().execute(request, null) { progress, eta, line ->
+                    Log.d(TAG, "download: ${progress}% — $line")
+                    // Float→Double, null-safety pour interop Java (line/eta peuvent être null).
+                    val event = mapOf(
+                        "progress" to progress.toDouble(),
+                        "eta"      to (eta?.toDouble() ?: 0.0),
+                        "line"     to (line ?: ""),
+                    )
+                    mainHandler.post {
+                        try {
+                            progressSink?.success(event)
+                        } catch (e: Throwable) {
+                            Log.e(TAG, "download: erreur progress sink: $e")
+                        }
+                    }
+                }
+                Log.i(TAG, "download: terminé, envoi résultat Flutter...")
+                mainHandler.post {
+                    try {
+                        result.success(true)
+                        Log.i(TAG, "download: result.success envoyé")
+                    } catch (e: Throwable) {
+                        // Le canal peut être fermé si l'engine a été détaché (ex. rotation d'écran).
+                        Log.e(TAG, "download: result.success ÉCHEC (engine détaché ?): $e")
+                    }
+                }
+            } catch (e: Throwable) {
+                Log.e(TAG, "download: ÉCHEC", e)
+                mainHandler.post { result.error("DOWNLOAD_ERROR", e.message, null) }
+            }
+        }.start()
+    }
+}
