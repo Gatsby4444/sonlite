@@ -561,8 +561,10 @@ class _PlaylistDetailScreenState
     // Trouver l'index dans la queue filtrée (ou 0 si la piste est désactivée)
     final clickedTrack = entries[index].track;
     final queueIndex = enabledEntries.indexWhere((e) => e.track.id == clickedTrack.id);
-    handler.updateQueue(queue).then((_) => handler.skipToQueueItem(queueIndex < 0 ? 0 : queueIndex));
-    ref.read(playerExpandedProvider.notifier).state = true;
+    handler.updateQueue(queue).then((_) {
+      handler.skipToQueueItem(queueIndex < 0 ? 0 : queueIndex);
+      ref.read(playerExpandedProvider.notifier).state = true;
+    });
   }
 
   void _playAll(List<PlaylistTrackEntry> entries) => _playFrom(entries, 0);

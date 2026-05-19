@@ -126,8 +126,10 @@ class TrackTile extends ConsumerWidget {
   void _playFrom(WidgetRef ref, BuildContext context) {
     final handler = ref.read(audioHandlerProvider);
     final queue = allTracks.map(trackToMediaItem).toList();
-    handler.updateQueue(queue).then((_) => handler.skipToQueueItem(index));
-    ref.read(playerExpandedProvider.notifier).state = true;
+    handler.updateQueue(queue).then((_) {
+      handler.skipToQueueItem(index);
+      ref.read(playerExpandedProvider.notifier).state = true;
+    });
   }
 
   void _onMenuSelected(String value, BuildContext context, WidgetRef ref) {

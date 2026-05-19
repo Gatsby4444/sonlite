@@ -154,6 +154,15 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
     final mediaItem = ref.watch(currentMediaItemProvider).valueOrNull;
     if (mediaItem == null) return const SizedBox.shrink();
 
+    // Sécurité : si playerExpandedProvider=true avant que mediaItem était prêt,
+    // le listener ref.listen n'a pas pu déclencher l'animation. On la force ici.
+    final shouldBeExpanded = ref.watch(playerExpandedProvider);
+    if (shouldBeExpanded && _expandCtrl.value < 0.01) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _expand();
+      });
+    }
+
     final mq = MediaQuery.of(context);
     final screenH = mq.size.height;
     final screenW = mq.size.width;
@@ -383,32 +392,36 @@ class _FullContent extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // ── Poignée + bouton fermer (position fixe en haut) ────────────
-          Padding(
-            padding: const EdgeInsets.only(top: 12, bottom: 4),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.keyboard_arrow_down),
-                  tooltip: 'Réduire',
-                  onPressed: onCollapse,
-                ),
-                Expanded(
-                  child: Center(
-                    child: Container(
-                      width: 36,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurfaceVariant
-                            .withValues(alpha: 0.4),
-                        borderRadius: BorderRadius.circular(2),
+          GestureDetector(
+            onHorizontalDragUpdate: onArtworkDragUpdate,
+            onHorizontalDragEnd: onArtworkDragEnd,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 12, bottom: 4),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.keyboard_arrow_down),
+                    tooltip: 'Réduire',
+                    onPressed: onCollapse,
+                  ),
+                  Expanded(
+                    child: Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant
+                              .withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
                       ),
                     ),
                   ),
-                ),
-                _MenuButton(item: item),
-              ],
+                  _MenuButton(item: item),
+                ],
+              ),
             ),
           ),
 
@@ -448,49 +461,55 @@ class _FullContent extends ConsumerWidget {
           // ── Zone titre (flexible, remplit l'espace entre artwork et contrôles)
           // Le texte est centré dans cet espace ; tronqué si trop long.
           Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 220),
-                transitionBuilder: (child, anim) => SlideTransition(
-                  position: Tween<Offset>(
-                    begin: Offset(swipeDirection.toDouble(), 0),
-                    end: Offset.zero,
-                  ).animate(CurvedAnimation(
-                      parent: anim, curve: Curves.easeOutCubic)),
-                  child: FadeTransition(opacity: anim, child: child),
-                ),
-                child: Transform.translate(
-                  key: ValueKey(item.id),
-                  offset: Offset(titleOffset, 0),
-                  child: Opacity(
-                    opacity: titleOpacity,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          item.title,
-                          style: Theme.of(context)
-                              .textTheme
-                              .headlineSmall
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          item.artist ?? '',
-                          style:
-                              Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
-                                  ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
+            child: GestureDetector(
+              onHorizontalDragUpdate: onArtworkDragUpdate,
+              onHorizontalDragEnd: onArtworkDragEnd,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 220),
+                  transitionBuilder: (child, anim) => SlideTransition(
+                    position: Tween<Offset>(
+                      begin: Offset(swipeDirection.toDouble(), 0),
+                      end: Offset.zero,
+                    ).animate(CurvedAnimation(
+                        parent: anim, curve: Curves.easeOutCubic)),
+                    child: FadeTransition(opacity: anim, child: child),
+                  ),
+                  child: Transform.translate(
+                    key: ValueKey(item.id),
+                    offset: Offset(titleOffset, 0),
+                    child: Opacity(
+                      opacity: titleOpacity,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            item.title,
+                            style: Theme.of(context)
+                                .textTheme
+                                .headlineSmall
+                                ?.copyWith(fontWeight: FontWeight.bold),
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            item.artist ?? '',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyLarge
+                                ?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
