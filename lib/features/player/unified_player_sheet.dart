@@ -22,7 +22,11 @@ const double _kNavBarHeight = 80.0;
 // ─── Lecteur unifié ───────────────────────────────────────────────────────────
 
 class UnifiedPlayerSheet extends ConsumerStatefulWidget {
-  const UnifiedPlayerSheet({super.key});
+  /// Offset au-dessus du bas pour le mini-player.
+  /// Dans AppShell (avec NavigationBar) : _kNavBarHeight (défaut).
+  /// Dans les écrans sans NavigationBar : 0.
+  final double navBarOffset;
+  const UnifiedPlayerSheet({super.key, this.navBarOffset = _kNavBarHeight});
 
   @override
   ConsumerState<UnifiedPlayerSheet> createState() => _UnifiedPlayerSheetState();
@@ -179,7 +183,7 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
     final screenH = mq.size.height;
     final screenW = mq.size.width;
     final safeBottom = mq.padding.bottom;
-    final navH = _kNavBarHeight + safeBottom;
+    final navH = widget.navBarOffset + safeBottom;
 
     return AnimatedBuilder(
       animation: Listenable.merge([_expandCtrl, _swipeCtrl]),

@@ -13,6 +13,7 @@ import '../../core/database/track_repository.dart';
 import '../../core/services/image_service.dart';
 import '../../features/player/providers/player_providers.dart';
 import '../../features/player/providers/player_expansion_provider.dart';
+import '../player/unified_player_sheet.dart';
 import '../shared/track_art.dart';
 
 part 'playlists_screen.g.dart';
@@ -445,7 +446,9 @@ class _PlaylistDetailScreenState
         ),
     ];
 
-    return Scaffold(
+    return Stack(
+      children: [
+        Scaffold(
       body: NestedScrollView(
         headerSliverBuilder: (_, innerBoxIsScrolled) => [
           SliverAppBar(
@@ -503,6 +506,9 @@ class _PlaylistDetailScreenState
                     },
                   ),
       ),
+        ),
+        const UnifiedPlayerSheet(navBarOffset: 0),
+      ],
     );
   }
 
