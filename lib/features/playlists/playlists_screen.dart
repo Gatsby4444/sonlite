@@ -412,6 +412,15 @@ class _PlaylistDetailScreenState
     _loadTracks();
   }
 
+  @override
+  void dispose() {
+    // Garantit que playerExpandedProvider = false quand on quitte la playlist,
+    // même si l'animation de collapse n'a pas eu le temps de se terminer
+    // (TickerFuture annulé par dispose — le .then() ne s'exécuterait pas).
+    ref.read(playerExpandedProvider.notifier).state = false;
+    super.dispose();
+  }
+
   Future<void> _loadTracks() async {
     final tracks = await ref
         .read(playlistRepositoryProvider.notifier)
