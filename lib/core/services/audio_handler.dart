@@ -121,9 +121,6 @@ class SonLiteAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandle
   Future<void> updateQueue(List<MediaItem> queue) async {
     _originalQueue = List.from(queue);
     this.queue.add(queue);
-    if (queue.isNotEmpty) {
-      await skipToQueueItem(0);
-    }
   }
 
   // Cycle 4 états : off → ×1 → ×2 → infini → off

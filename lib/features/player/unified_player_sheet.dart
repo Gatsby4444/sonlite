@@ -151,13 +151,25 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
       }
     });
 
+    // Déclencheur de secours : mediaItem vient d'arriver (null → non-null)
+    // et le provider dit déjà "expanded" → forcer l'expansion au frame suivant.
+    ref.listen<AsyncValue<MediaItem?>>(currentMediaItemProvider, (prev, next) {
+      final hadItem = prev?.valueOrNull != null;
+      final hasItem = next.valueOrNull != null;
+      if (!hadItem && hasItem && ref.read(playerExpandedProvider)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _expand();
+        });
+      }
+    });
+
     final mediaItem = ref.watch(currentMediaItemProvider).valueOrNull;
     if (mediaItem == null) return const SizedBox.shrink();
 
-    // Sécurité : si playerExpandedProvider=true avant que mediaItem était prêt,
-    // le listener ref.listen n'a pas pu déclencher l'animation. On la force ici.
+    // Safety check élargi : si le controller est encore en dessous de 0.5
+    // quand le rebuild arrive avec shouldBeExpanded = true, forcer l'expansion.
     final shouldBeExpanded = ref.watch(playerExpandedProvider);
-    if (shouldBeExpanded && _expandCtrl.value < 0.01) {
+    if (shouldBeExpanded && _expandCtrl.value < 0.5) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _expand();
       });
@@ -391,128 +403,130 @@ class _FullContent extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ── Poignée + bouton fermer (position fixe en haut) ────────────
-          GestureDetector(
-            onHorizontalDragUpdate: onArtworkDragUpdate,
-            onHorizontalDragEnd: onArtworkDragEnd,
-            child: Padding(
-              padding: const EdgeInsets.only(top: 12, bottom: 4),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.keyboard_arrow_down),
-                    tooltip: 'Réduire',
-                    onPressed: onCollapse,
-                  ),
-                  Expanded(
-                    child: Center(
-                      child: Container(
-                        width: 36,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurfaceVariant
-                              .withValues(alpha: 0.4),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                  ),
-                  _MenuButton(item: item),
-                ],
-              ),
-            ),
-          ),
-
-          // ── Artwork (position verticale fixe, juste sous le header) ────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: SizedBox(
-              height: artW,
-              child: GestureDetector(
-                onHorizontalDragUpdate: onArtworkDragUpdate,
-                onHorizontalDragEnd: onArtworkDragEnd,
-                child: ClipRect(
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      if (prevItem != null)
-                        Transform.translate(
-                          offset: Offset(prevOffset, 0),
-                          child: _ArtworkCard(item: prevItem, size: artW),
-                        ),
-                      Transform.translate(
-                        offset: Offset(currentOffset, 0),
-                        child: _ArtworkCard(item: item, size: artW),
-                      ),
-                      if (nextItem != null)
-                        Transform.translate(
-                          offset: Offset(nextOffset, 0),
-                          child: _ArtworkCard(item: nextItem, size: artW),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-          // ── Zone titre (flexible, remplit l'espace entre artwork et contrôles)
-          // Le texte est centré dans cet espace ; tronqué si trop long.
+          // ── Zone supérieure : un seul GestureDetector pleine largeur ────
+          // Couvre header + artwork + titre sur toute la surface disponible.
+          // HitTestBehavior.translucent laisse passer les taps aux boutons enfants.
           Expanded(
             child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
               onHorizontalDragUpdate: onArtworkDragUpdate,
               onHorizontalDragEnd: onArtworkDragEnd,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
-                  transitionBuilder: (child, anim) => SlideTransition(
-                    position: Tween<Offset>(
-                      begin: Offset(swipeDirection.toDouble(), 0),
-                      end: Offset.zero,
-                    ).animate(CurvedAnimation(
-                        parent: anim, curve: Curves.easeOutCubic)),
-                    child: FadeTransition(opacity: anim, child: child),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Header
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12, bottom: 4),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.keyboard_arrow_down),
+                          tooltip: 'Réduire',
+                          onPressed: onCollapse,
+                        ),
+                        Expanded(
+                          child: Center(
+                            child: Container(
+                              width: 36,
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant
+                                    .withValues(alpha: 0.4),
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
+                        ),
+                        _MenuButton(item: item),
+                      ],
+                    ),
                   ),
-                  child: Transform.translate(
-                    key: ValueKey(item.id),
-                    offset: Offset(titleOffset, 0),
-                    child: Opacity(
-                      opacity: titleOpacity,
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            item.title,
-                            style: Theme.of(context)
-                                .textTheme
-                                .headlineSmall
-                                ?.copyWith(fontWeight: FontWeight.bold),
-                            textAlign: TextAlign.center,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            item.artist ?? '',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyLarge
-                                ?.copyWith(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant,
-                                ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
+
+                  // Artwork
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: SizedBox(
+                      height: artW,
+                      child: ClipRect(
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            if (prevItem != null)
+                              Transform.translate(
+                                offset: Offset(prevOffset, 0),
+                                child: _ArtworkCard(item: prevItem, size: artW),
+                              ),
+                            Transform.translate(
+                              offset: Offset(currentOffset, 0),
+                              child: _ArtworkCard(item: item, size: artW),
+                            ),
+                            if (nextItem != null)
+                              Transform.translate(
+                                offset: Offset(nextOffset, 0),
+                                child: _ArtworkCard(item: nextItem, size: artW),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
+
+                  // Titre / artiste
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
+                        transitionBuilder: (child, anim) => SlideTransition(
+                          position: Tween<Offset>(
+                            begin: Offset(swipeDirection.toDouble(), 0),
+                            end: Offset.zero,
+                          ).animate(CurvedAnimation(
+                              parent: anim, curve: Curves.easeOutCubic)),
+                          child: FadeTransition(opacity: anim, child: child),
+                        ),
+                        child: Transform.translate(
+                          key: ValueKey(item.id),
+                          offset: Offset(titleOffset, 0),
+                          child: Opacity(
+                            opacity: titleOpacity,
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  item.title,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineSmall
+                                      ?.copyWith(fontWeight: FontWeight.bold),
+                                  textAlign: TextAlign.center,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  item.artist ?? '',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodyLarge
+                                      ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                      ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
