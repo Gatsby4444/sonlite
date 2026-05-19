@@ -52,6 +52,7 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
       duration: const Duration(milliseconds: 250),
       lowerBound: -1.0,
       upperBound: 1.0,
+      value: 0.0,
     );
   }
 
@@ -169,15 +170,6 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
 
     final mediaItem = ref.watch(currentMediaItemProvider).valueOrNull;
     if (mediaItem == null) return const SizedBox.shrink();
-
-    // Safety check élargi : si le controller est encore en dessous de 0.5
-    // quand le rebuild arrive avec shouldBeExpanded = true, forcer l'expansion.
-    final shouldBeExpanded = ref.watch(playerExpandedProvider);
-    if (shouldBeExpanded && _expandCtrl.value < 0.5) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _expand();
-      });
-    }
 
     final mq = MediaQuery.of(context);
     final screenH = mq.size.height;
