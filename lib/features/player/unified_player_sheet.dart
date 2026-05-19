@@ -72,10 +72,11 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
   }
 
   void _onVerticalDragUpdate(DragUpdateDetails d) {
-    final delta = -d.delta.dy; // positif = vers le haut
+    // Ignorer les gestes principalement horizontaux : évite la fermeture accidentelle
+    // lors d'un swipe artwork (le doigt dévie légèrement vers le bas)
+    if (d.delta.dx.abs() > d.delta.dy.abs()) return;
+    final delta = -d.delta.dy;
     final screenH = MediaQuery.sizeOf(context).height;
-    // Sensibilité ×4 en mode mini (sinon 72px de course ne suffisent jamais)
-    // diminue progressivement jusqu'à ×1 en mode plein écran
     final sensitivity = ui.lerpDouble(4.0, 1.0, _expandCtrl.value)!;
     _expandCtrl.value =
         (_expandCtrl.value + delta * sensitivity / screenH).clamp(0.0, 1.0);
@@ -83,8 +84,8 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
 
   void _onVerticalDragEnd(DragEndDetails d) {
     final vy = d.velocity.pixelsPerSecond.dy;
-    // vy > 0 = vers le bas (Flutter : y croît vers le bas)
-    if (vy > 200 || _expandCtrl.value < 0.4) {
+    // Seuil plus élevé (400 px/s) pour éviter les fermetures accidentelles
+    if (vy > 400 || _expandCtrl.value < 0.35) {
       _collapse();
     } else {
       _expand();
@@ -374,13 +375,14 @@ class _FullContent extends ConsumerWidget {
     final titleOffset = swipe * artW * 0.3;
     final titleOpacity = (1.0 - swipe.abs() * 1.5).clamp(0.0, 1.0);
 
-    // Le GestureDetector vertical est géré par le parent (Positioned level).
-    // On ne l'ajoute pas ici pour éviter les conflits avec le swipe horizontal.
+    final safeBottom = MediaQuery.paddingOf(context).bottom;
+
     return Opacity(
       opacity: contentOpacity,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ── Poignée + bouton fermer ─────────────────────────────────────
+          // ── Poignée + bouton fermer (position fixe en haut) ────────────
           Padding(
             padding: const EdgeInsets.only(top: 12, bottom: 4),
             child: Row(
@@ -410,75 +412,32 @@ class _FullContent extends ConsumerWidget {
             ),
           ),
 
-          // ── Artwork avec swipe parallaxe ────────────────────────────────
-          SizedBox(
-            height: artW + 20,
-            child: GestureDetector(
-              onHorizontalDragUpdate: onArtworkDragUpdate,
-              onHorizontalDragEnd: onArtworkDragEnd,
-              child: ClipRect(
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    if (prevItem != null)
-                      Transform.translate(
-                        offset: Offset(prevOffset, 0),
-                        child: _ArtworkCard(item: prevItem, size: artW),
-                      ),
-                    Transform.translate(
-                      offset: Offset(currentOffset, 0),
-                      child: _ArtworkCard(item: item, size: artW),
-                    ),
-                    if (nextItem != null)
-                      Transform.translate(
-                        offset: Offset(nextOffset, 0),
-                        child: _ArtworkCard(item: nextItem, size: artW),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // ── Titre + artiste avec parallaxe ─────────────────────────────
+          // ── Artwork (position verticale fixe, juste sous le header) ────
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
-              transitionBuilder: (child, anim) => SlideTransition(
-                position: Tween<Offset>(
-                  begin: Offset(swipeDirection.toDouble(), 0),
-                  end: Offset.zero,
-                ).animate(
-                    CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
-                child: FadeTransition(opacity: anim, child: child),
-              ),
-              child: Transform.translate(
-                key: ValueKey(item.id),
-                offset: Offset(titleOffset, 0),
-                child: Opacity(
-                  opacity: titleOpacity,
-                  child: Column(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: SizedBox(
+              height: artW,
+              child: GestureDetector(
+                onHorizontalDragUpdate: onArtworkDragUpdate,
+                onHorizontalDragEnd: onArtworkDragEnd,
+                child: ClipRect(
+                  child: Stack(
+                    alignment: Alignment.center,
                     children: [
-                      Text(
-                        item.title,
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineSmall
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                      if (prevItem != null)
+                        Transform.translate(
+                          offset: Offset(prevOffset, 0),
+                          child: _ArtworkCard(item: prevItem, size: artW),
+                        ),
+                      Transform.translate(
+                        offset: Offset(currentOffset, 0),
+                        child: _ArtworkCard(item: item, size: artW),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        item.artist ?? '',
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
-                            ),
-                      ),
+                      if (nextItem != null)
+                        Transform.translate(
+                          offset: Offset(nextOffset, 0),
+                          child: _ArtworkCard(item: nextItem, size: artW),
+                        ),
                     ],
                   ),
                 ),
@@ -486,7 +445,60 @@ class _FullContent extends ConsumerWidget {
             ),
           ),
 
-          // ── Slider de position ──────────────────────────────────────────
+          // ── Zone titre (flexible, remplit l'espace entre artwork et contrôles)
+          // Le texte est centré dans cet espace ; tronqué si trop long.
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                transitionBuilder: (child, anim) => SlideTransition(
+                  position: Tween<Offset>(
+                    begin: Offset(swipeDirection.toDouble(), 0),
+                    end: Offset.zero,
+                  ).animate(CurvedAnimation(
+                      parent: anim, curve: Curves.easeOutCubic)),
+                  child: FadeTransition(opacity: anim, child: child),
+                ),
+                child: Transform.translate(
+                  key: ValueKey(item.id),
+                  offset: Offset(titleOffset, 0),
+                  child: Opacity(
+                    opacity: titleOpacity,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          item.title,
+                          style: Theme.of(context)
+                              .textTheme
+                              .headlineSmall
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          item.artist ?? '',
+                          style:
+                              Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // ── Contrôles fixes en bas ──────────────────────────────────────
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
             child: PlayerPositionSlider(
@@ -507,9 +519,7 @@ class _FullContent extends ConsumerWidget {
               ],
             ),
           ),
-          const SizedBox(height: 16),
-
-          // ── Contrôles de lecture ────────────────────────────────────────
+          const SizedBox(height: 12),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Row(
@@ -540,9 +550,7 @@ class _FullContent extends ConsumerWidget {
               ],
             ),
           ),
-          const SizedBox(height: 8),
-
-          // ── Boucle + shuffle ────────────────────────────────────────────
+          const SizedBox(height: 4),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -562,6 +570,7 @@ class _FullContent extends ConsumerWidget {
               ),
             ],
           ),
+          SizedBox(height: safeBottom + 8),
         ],
       ),
     );

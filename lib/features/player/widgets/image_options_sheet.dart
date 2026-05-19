@@ -26,15 +26,24 @@ class ImageOptionsSheet extends ConsumerWidget {
           ),
           ListTile(
             leading: const Icon(Icons.photo_library_outlined),
-            title: const Text('Choisir depuis la galerie'),
+            title: const Text('Galerie'),
             onTap: () async {
               final notifier = ref.read(trackRepositoryProvider.notifier);
               final trackId = track.id;
               Navigator.pop(context);
               final path = await ImageService.pickCropAndSave();
-              if (path != null) {
-                await notifier.updateThumbnail(trackId, path);
-              }
+              if (path != null) await notifier.updateThumbnail(trackId, path);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.folder_outlined),
+            title: const Text('Fichiers'),
+            onTap: () async {
+              final notifier = ref.read(trackRepositoryProvider.notifier);
+              final trackId = track.id;
+              Navigator.pop(context);
+              final path = await ImageService.pickCropAndSaveFromFiles();
+              if (path != null) await notifier.updateThumbnail(trackId, path);
             },
           ),
           if (hasCurrent)

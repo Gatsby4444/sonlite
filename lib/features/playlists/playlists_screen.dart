@@ -17,6 +17,8 @@ import '../shared/track_art.dart';
 
 part 'playlists_screen.g.dart';
 
+enum _ImageSource { gallery, files, remove }
+
 @riverpod
 Future<List<PlaylistTrackEntry>> playlistTracks(Ref ref, int playlistId) {
   return ref.watch(playlistRepositoryProvider.notifier).getTracksForPlaylist(playlistId);
@@ -236,6 +238,7 @@ class _EditPlaylistSheet extends ConsumerStatefulWidget {
 class _EditPlaylistSheetState extends ConsumerState<_EditPlaylistSheet> {
   late final _nameCtrl = TextEditingController(text: widget.playlist.name);
   String? _newImagePath;
+  bool _removeImage = false;
 
   @override
   void dispose() {
@@ -243,14 +246,56 @@ class _EditPlaylistSheetState extends ConsumerState<_EditPlaylistSheet> {
     super.dispose();
   }
 
-  Future<void> _pickImage() async {
-    final path = await ImageService.pickCropAndSave();
-    if (path != null) setState(() => _newImagePath = path);
+  Future<void> _pickImage(BuildContext context) async {
+    final choice = await showModalBottomSheet<_ImageSource>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Galerie'),
+              onTap: () => Navigator.pop(context, _ImageSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_outlined),
+              title: const Text('Fichiers'),
+              onTap: () => Navigator.pop(context, _ImageSource.files),
+            ),
+            if ((_newImagePath ?? widget.playlist.thumbnailPath) != null &&
+                !_removeImage)
+              ListTile(
+                leading: const Icon(Icons.hide_image_outlined),
+                title: const Text("Supprimer l'image"),
+                onTap: () => Navigator.pop(context, _ImageSource.remove),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) return;
+    if (choice == _ImageSource.remove) {
+      setState(() {
+        _removeImage = true;
+        _newImagePath = null;
+      });
+      return;
+    }
+    final path = choice == _ImageSource.gallery
+        ? await ImageService.pickCropAndSave()
+        : await ImageService.pickCropAndSaveFromFiles();
+    if (path != null) {
+      setState(() {
+        _newImagePath = path;
+        _removeImage = false;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final displayImage = _newImagePath ?? widget.playlist.thumbnailPath;
+    final displayImage = _removeImage ? null : (_newImagePath ?? widget.playlist.thumbnailPath);
 
     return Padding(
       padding: EdgeInsets.only(
@@ -269,7 +314,7 @@ class _EditPlaylistSheetState extends ConsumerState<_EditPlaylistSheet> {
           Row(
             children: [
               GestureDetector(
-                onTap: _pickImage,
+                onTap: () => _pickImage(context),
                 child: Stack(
                   children: [
                     ClipRRect(
@@ -326,10 +371,13 @@ class _EditPlaylistSheetState extends ConsumerState<_EditPlaylistSheet> {
             onPressed: () async {
               final name = _nameCtrl.text.trim();
               if (name.isEmpty) return;
+              final thumb = _removeImage
+                  ? null
+                  : (_newImagePath ?? widget.playlist.thumbnailPath);
               await ref.read(playlistRepositoryProvider.notifier).updatePlaylist(
                     widget.playlist.id,
                     name,
-                    thumbnailPath: _newImagePath ?? widget.playlist.thumbnailPath,
+                    thumbnailPath: thumb,
                   );
               if (context.mounted) Navigator.pop(context);
             },
