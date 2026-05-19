@@ -77,39 +77,43 @@ class AppShell extends ConsumerWidget {
     final item = ref.watch(currentMediaItemProvider).valueOrNull;
     final hasPlayer = item != null;
 
-    return Scaffold(
-      body: Stack(
-        children: [
-          Column(
+    // Stack extérieur : le UnifiedPlayerSheet overlay l'écran complet
+    // (Scaffold + NavigationBar), ce qui permet un positionnement correct
+    // du mini-player et une couverture totale en mode plein écran.
+    return Stack(
+      children: [
+        Scaffold(
+          body: Column(
             children: [
               Expanded(child: child),
+              // Espace réservé pour le mini-player quand un morceau est actif
               AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 height: hasPlayer ? 72.0 : 0.0,
               ),
             ],
           ),
-          const UnifiedPlayerSheet(),
-        ],
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: currentIndex,
-        onDestinationSelected: (i) {
-          switch (i) {
-            case 0:
-              context.go('/library');
-            case 1:
-              context.go('/playlists');
-            case 2:
-              context.go('/download');
-          }
-        },
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.library_music), label: 'Bibliothèque'),
-          NavigationDestination(icon: Icon(Icons.queue_music), label: 'Playlists'),
-          NavigationDestination(icon: Icon(Icons.download), label: 'Télécharger'),
-        ],
-      ),
+          bottomNavigationBar: NavigationBar(
+            selectedIndex: currentIndex,
+            onDestinationSelected: (i) {
+              switch (i) {
+                case 0:
+                  context.go('/library');
+                case 1:
+                  context.go('/playlists');
+                case 2:
+                  context.go('/download');
+              }
+            },
+            destinations: const [
+              NavigationDestination(icon: Icon(Icons.library_music), label: 'Bibliothèque'),
+              NavigationDestination(icon: Icon(Icons.queue_music), label: 'Playlists'),
+              NavigationDestination(icon: Icon(Icons.download), label: 'Télécharger'),
+            ],
+          ),
+        ),
+        const UnifiedPlayerSheet(),
+      ],
     );
   }
 }

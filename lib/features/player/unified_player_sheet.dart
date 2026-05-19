@@ -91,33 +91,51 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
   // ── Swipe horizontal artwork (Apple Music parallaxe) ─────────────────────────
 
   void _onArtworkDragUpdate(DragUpdateDetails d) {
-    final w = MediaQuery.sizeOf(context).width;
+    // Normaliser sur la largeur de l'artwork pour un tracking 1:1 avec le doigt
+    final artW = (MediaQuery.sizeOf(context).width - 64).clamp(200.0, 320.0);
     _swipeCtrl.value =
-        (_swipeCtrl.value - d.delta.dx / w).clamp(-1.0, 1.0);
+        (_swipeCtrl.value - d.delta.dx / artW).clamp(-1.0, 1.0);
   }
 
   void _onArtworkDragEnd(DragEndDetails d, SonLiteAudioHandler handler) {
     final vx = d.velocity.pixelsPerSecond.dx;
     final v = _swipeCtrl.value;
 
-    if (vx < -300 || v < -0.35) {
-      // Swipe gauche → piste suivante
+    // Swipe gauche (dx < 0) → valeur augmente vers +1 → piste suivante
+    // Swipe droite (dx > 0) → valeur diminue vers -1 → piste précédente
+    if (vx < -500 || v > 0.35) {
       setState(() => _swipeDirection = 1);
-      _swipeCtrl.animateTo(-1.0, curve: Curves.easeOut).then((_) {
+      // Continuer dans la même direction (vers +1) pour sortie fluide
+      _swipeCtrl
+          .animateTo(1.0,
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeIn)
+          .then((_) {
         handler.skipToNext();
-        _swipeCtrl.value = 1.0;
-        _swipeCtrl.animateTo(0.0, curve: Curves.easeOutCubic);
+        // Nouvelle piste entre depuis la droite (value reste à +1, anime vers 0)
+        _swipeCtrl.animateTo(0.0,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic);
       });
-    } else if (vx > 300 || v > 0.35) {
-      // Swipe droite → piste précédente
+    } else if (vx > 500 || v < -0.35) {
       setState(() => _swipeDirection = -1);
-      _swipeCtrl.animateTo(1.0, curve: Curves.easeOut).then((_) {
+      // Continuer dans la même direction (vers -1) pour sortie fluide
+      _swipeCtrl
+          .animateTo(-1.0,
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeIn)
+          .then((_) {
         handler.skipToPrevious();
-        _swipeCtrl.value = -1.0;
-        _swipeCtrl.animateTo(0.0, curve: Curves.easeOutCubic);
+        // Nouvelle piste entre depuis la gauche (value reste à -1, anime vers 0)
+        _swipeCtrl.animateTo(0.0,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic);
       });
     } else {
-      _swipeCtrl.animateTo(0.0, curve: Curves.elasticOut);
+      // Spring-back sans rebond
+      _swipeCtrl.animateTo(0.0,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic);
     }
   }
 
