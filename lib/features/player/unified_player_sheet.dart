@@ -17,7 +17,7 @@ import 'widgets/position_slider.dart';
 import 'widgets/repeat_button.dart';
 
 const double _kMiniHeight = 72.0;
-const double _kNavBarHeight = 80.0; // NavigationBar Material 3
+const double _kNavBarHeight = 80.0;
 
 // ─── Lecteur unifié ───────────────────────────────────────────────────────────
 
@@ -33,7 +33,8 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
   late final AnimationController _expandCtrl;
   late final AnimationController _swipeCtrl;
 
-  int _swipeDirection = 1; // 1 = prochain depuis droite, -1 = précédent depuis gauche
+  // 1 = piste suivante entre depuis la droite, -1 = précédente depuis la gauche
+  int _swipeDirection = 1;
 
   @override
   void initState() {
@@ -42,10 +43,9 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
       vsync: this,
       duration: const Duration(milliseconds: 350),
     );
-    // Représente l'offset horizontal normalisé (-1=gauche, 0=centre, 1=droite)
     _swipeCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 250),
       lowerBound: -1.0,
       upperBound: 1.0,
     );
@@ -72,64 +72,63 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
   }
 
   void _onVerticalDragUpdate(DragUpdateDetails d) {
-    final delta = -d.delta.dy;
+    final delta = -d.delta.dy; // positif = vers le haut
     final screenH = MediaQuery.sizeOf(context).height;
-    _expandCtrl.value = (_expandCtrl.value + delta / screenH).clamp(0.0, 1.0);
+    // Sensibilité ×4 en mode mini (sinon 72px de course ne suffisent jamais)
+    // diminue progressivement jusqu'à ×1 en mode plein écran
+    final sensitivity = ui.lerpDouble(4.0, 1.0, _expandCtrl.value)!;
+    _expandCtrl.value =
+        (_expandCtrl.value + delta * sensitivity / screenH).clamp(0.0, 1.0);
   }
 
   void _onVerticalDragEnd(DragEndDetails d) {
     final vy = d.velocity.pixelsPerSecond.dy;
-    if (vy > 500 || _expandCtrl.value < 0.5) {
+    // vy > 0 = vers le bas (Flutter : y croît vers le bas)
+    if (vy > 200 || _expandCtrl.value < 0.4) {
       _collapse();
     } else {
-      _expandCtrl.animateTo(1.0, curve: Curves.easeOutCubic).then((_) {
-        ref.read(playerExpandedProvider.notifier).state = true;
-      });
+      _expand();
     }
   }
 
   // ── Swipe horizontal artwork (Apple Music parallaxe) ─────────────────────────
 
   void _onArtworkDragUpdate(DragUpdateDetails d) {
-    // Normaliser sur la largeur de l'artwork pour un tracking 1:1 avec le doigt
     final artW = (MediaQuery.sizeOf(context).width - 64).clamp(200.0, 320.0);
+    // + d.delta.dx : l'artwork suit le doigt dans le même sens
+    // dx < 0 (doigt vers gauche) → value diminue vers -1 → artwork sort à gauche
+    // dx > 0 (doigt vers droite) → value monte vers +1  → artwork sort à droite
     _swipeCtrl.value =
-        (_swipeCtrl.value - d.delta.dx / artW).clamp(-1.0, 1.0);
+        (_swipeCtrl.value + d.delta.dx / artW).clamp(-1.0, 1.0);
   }
 
   void _onArtworkDragEnd(DragEndDetails d, SonLiteAudioHandler handler) {
     final vx = d.velocity.pixelsPerSecond.dx;
     final v = _swipeCtrl.value;
 
-    // Swipe gauche (dx < 0) → valeur augmente vers +1 → piste suivante
-    // Swipe droite (dx > 0) → valeur diminue vers -1 → piste précédente
-    if (vx < -500 || v > 0.35) {
+    if (vx < -500 || v < -0.35) {
+      // Swipe gauche → artwork sort à gauche → piste suivante
       setState(() => _swipeDirection = 1);
-      // Continuer dans la même direction (vers +1) pour sortie fluide
       _swipeCtrl
-          .animateTo(1.0,
-              duration: const Duration(milliseconds: 160),
+          .animateTo(-1.0,
+              duration: const Duration(milliseconds: 150),
               curve: Curves.easeIn)
           .then((_) {
         handler.skipToNext();
-        // Nouvelle piste entre depuis la droite (value reste à +1, anime vers 0)
-        _swipeCtrl.animateTo(0.0,
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic);
+        // Snap au centre : nouvelle piste apparaît directement en place,
+        // sans animation d'entrée parasite (évite l'effet rollback)
+        _swipeCtrl.value = 0.0;
       });
-    } else if (vx > 500 || v < -0.35) {
+    } else if (vx > 500 || v > 0.35) {
+      // Swipe droite → artwork sort à droite → piste précédente
       setState(() => _swipeDirection = -1);
-      // Continuer dans la même direction (vers -1) pour sortie fluide
       _swipeCtrl
-          .animateTo(-1.0,
-              duration: const Duration(milliseconds: 160),
+          .animateTo(1.0,
+              duration: const Duration(milliseconds: 150),
               curve: Curves.easeIn)
           .then((_) {
         handler.skipToPrevious();
-        // Nouvelle piste entre depuis la gauche (value reste à -1, anime vers 0)
-        _swipeCtrl.animateTo(0.0,
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic);
+        _swipeCtrl.value = 0.0;
       });
     } else {
       // Spring-back sans rebond
@@ -143,7 +142,6 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
 
   @override
   Widget build(BuildContext context) {
-    // Réagit aux changements de l'expansion provider (déclenchés de l'extérieur)
     ref.listen<bool>(playerExpandedProvider, (_, expanded) {
       if (expanded && _expandCtrl.value < 0.99) {
         _expandCtrl.animateTo(1.0, curve: Curves.easeOutCubic);
@@ -176,20 +174,26 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
           right: 0,
           bottom: bottom,
           height: height,
-          child: _PlayerContainer(
-            t: t,
-            swipe: swipe,
-            swipeDirection: _swipeDirection,
-            screenW: screenW,
-            radius: radius,
-            elevation: elevation,
-            mediaItem: mediaItem,
-            onTapMini: _expand,
+          // GestureDetector vertical ici, au-dessus de toute la hiérarchie.
+          // Ainsi le drag ne se casse pas quand t passe la barre des 0.5
+          // (avant, la ternaire mini/full swappait le widget portant le geste).
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
             onVerticalDragUpdate: _onVerticalDragUpdate,
             onVerticalDragEnd: _onVerticalDragEnd,
-            onArtworkDragUpdate: _onArtworkDragUpdate,
-            onArtworkDragEnd: _onArtworkDragEnd,
-            onCollapse: _collapse,
+            child: _PlayerContainer(
+              t: t,
+              swipe: swipe,
+              swipeDirection: _swipeDirection,
+              screenW: screenW,
+              radius: radius,
+              elevation: elevation,
+              mediaItem: mediaItem,
+              onTapMini: _expand,
+              onArtworkDragUpdate: _onArtworkDragUpdate,
+              onArtworkDragEnd: _onArtworkDragEnd,
+              onCollapse: _collapse,
+            ),
           ),
         );
       },
@@ -208,8 +212,6 @@ class _PlayerContainer extends ConsumerWidget {
   final double elevation;
   final MediaItem mediaItem;
   final VoidCallback onTapMini;
-  final GestureDragUpdateCallback onVerticalDragUpdate;
-  final GestureDragEndCallback onVerticalDragEnd;
   final GestureDragUpdateCallback onArtworkDragUpdate;
   final void Function(DragEndDetails, SonLiteAudioHandler) onArtworkDragEnd;
   final VoidCallback onCollapse;
@@ -223,8 +225,6 @@ class _PlayerContainer extends ConsumerWidget {
     required this.elevation,
     required this.mediaItem,
     required this.onTapMini,
-    required this.onVerticalDragUpdate,
-    required this.onVerticalDragEnd,
     required this.onArtworkDragUpdate,
     required this.onArtworkDragEnd,
     required this.onCollapse,
@@ -234,22 +234,18 @@ class _PlayerContainer extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final handler = ref.read(audioHandlerProvider);
     final cs = Theme.of(context).colorScheme;
-    final bgColor = Color.lerp(
-      cs.surfaceContainerHigh,
-      cs.surface,
-      t,
-    )!;
+    final bgColor = Color.lerp(cs.surfaceContainerHigh, cs.surface, t)!;
 
     return Material(
       elevation: elevation,
       color: bgColor,
       borderRadius: BorderRadius.vertical(top: Radius.circular(radius)),
       clipBehavior: Clip.antiAlias,
+      // Pas de GestureDetector vertical ici : géré par le parent Positioned.
+      // Le tap mini est séparé car il ne doit pas interférer avec le drag.
       child: t < 0.5
           ? GestureDetector(
               onTap: onTapMini,
-              onVerticalDragUpdate: onVerticalDragUpdate,
-              onVerticalDragEnd: onVerticalDragEnd,
               child: _MiniContent(item: mediaItem),
             )
           : _FullContent(
@@ -259,8 +255,6 @@ class _PlayerContainer extends ConsumerWidget {
               swipeDirection: swipeDirection,
               screenW: screenW,
               onCollapse: onCollapse,
-              onVerticalDragUpdate: onVerticalDragUpdate,
-              onVerticalDragEnd: onVerticalDragEnd,
               onArtworkDragUpdate: onArtworkDragUpdate,
               onArtworkDragEnd: (d) => onArtworkDragEnd(d, handler),
             ),
@@ -338,8 +332,6 @@ class _FullContent extends ConsumerWidget {
   final int swipeDirection;
   final double screenW;
   final VoidCallback onCollapse;
-  final GestureDragUpdateCallback onVerticalDragUpdate;
-  final GestureDragEndCallback onVerticalDragEnd;
   final GestureDragUpdateCallback onArtworkDragUpdate;
   final GestureDragEndCallback onArtworkDragEnd;
 
@@ -350,8 +342,6 @@ class _FullContent extends ConsumerWidget {
     required this.swipeDirection,
     required this.screenW,
     required this.onCollapse,
-    required this.onVerticalDragUpdate,
-    required this.onVerticalDragEnd,
     required this.onArtworkDragUpdate,
     required this.onArtworkDragEnd,
   });
@@ -371,214 +361,208 @@ class _FullContent extends ConsumerWidget {
     final prevItem = idx > 0 ? queue[idx - 1] : null;
     final nextItem = idx >= 0 && idx < queue.length - 1 ? queue[idx + 1] : null;
 
-    // Fade-in du contenu full quand t > 0.5
     final contentOpacity = ((t - 0.5) * 2).clamp(0.0, 1.0);
     final artW = (screenW - 64).clamp(200.0, 320.0);
 
-    // Décalage horizontal en pixels pour l'artwork courant
+    // Offset courant : suit le doigt directement (swipe ∈ [-1, 1])
     final currentOffset = swipe * artW;
-    final nextOffset = currentOffset + artW + 16;
+    // Artwork précédent : toujours à gauche du courant
     final prevOffset = currentOffset - artW - 16;
-    // Parallaxe titre (30% de la vitesse de l'artwork)
+    // Artwork suivant : toujours à droite du courant
+    final nextOffset = currentOffset + artW + 16;
+    // Titre : parallaxe à 30% de la vitesse de l'artwork
     final titleOffset = swipe * artW * 0.3;
     final titleOpacity = (1.0 - swipe.abs() * 1.5).clamp(0.0, 1.0);
 
+    // Le GestureDetector vertical est géré par le parent (Positioned level).
+    // On ne l'ajoute pas ici pour éviter les conflits avec le swipe horizontal.
     return Opacity(
       opacity: contentOpacity,
-      child: GestureDetector(
-        // Geste vertical pour réduire le lecteur
-        onVerticalDragUpdate: onVerticalDragUpdate,
-        onVerticalDragEnd: onVerticalDragEnd,
-        child: Column(
-          children: [
-            // ── Poignée + bouton fermer ─────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.only(top: 12, bottom: 4),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.keyboard_arrow_down),
-                    tooltip: 'Réduire',
-                    onPressed: onCollapse,
-                  ),
-                  Expanded(
-                    child: Center(
-                      child: Container(
-                        width: 36,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurfaceVariant
-                              .withValues(alpha: 0.4),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
+      child: Column(
+        children: [
+          // ── Poignée + bouton fermer ─────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.only(top: 12, bottom: 4),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.keyboard_arrow_down),
+                  tooltip: 'Réduire',
+                  onPressed: onCollapse,
+                ),
+                Expanded(
+                  child: Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurfaceVariant
+                            .withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(2),
                       ),
                     ),
                   ),
-                  _MenuButton(item: item),
-                ],
+                ),
+                _MenuButton(item: item),
+              ],
+            ),
+          ),
+
+          // ── Artwork avec swipe parallaxe ────────────────────────────────
+          SizedBox(
+            height: artW + 20,
+            child: GestureDetector(
+              onHorizontalDragUpdate: onArtworkDragUpdate,
+              onHorizontalDragEnd: onArtworkDragEnd,
+              child: ClipRect(
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    if (prevItem != null)
+                      Transform.translate(
+                        offset: Offset(prevOffset, 0),
+                        child: _ArtworkCard(item: prevItem, size: artW),
+                      ),
+                    Transform.translate(
+                      offset: Offset(currentOffset, 0),
+                      child: _ArtworkCard(item: item, size: artW),
+                    ),
+                    if (nextItem != null)
+                      Transform.translate(
+                        offset: Offset(nextOffset, 0),
+                        child: _ArtworkCard(item: nextItem, size: artW),
+                      ),
+                  ],
+                ),
               ),
             ),
+          ),
 
-            // ── Artwork avec swipe parallaxe ────────────────────────────────
-            SizedBox(
-              height: artW + 20,
-              child: GestureDetector(
-                onHorizontalDragUpdate: onArtworkDragUpdate,
-                onHorizontalDragEnd: onArtworkDragEnd,
-                child: ClipRect(
-                  child: Stack(
-                    alignment: Alignment.center,
+          // ── Titre + artiste avec parallaxe ─────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              transitionBuilder: (child, anim) => SlideTransition(
+                position: Tween<Offset>(
+                  begin: Offset(swipeDirection.toDouble(), 0),
+                  end: Offset.zero,
+                ).animate(
+                    CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+                child: FadeTransition(opacity: anim, child: child),
+              ),
+              child: Transform.translate(
+                key: ValueKey(item.id),
+                offset: Offset(titleOffset, 0),
+                child: Opacity(
+                  opacity: titleOpacity,
+                  child: Column(
                     children: [
-                      // Artwork précédent
-                      if (prevItem != null)
-                        Transform.translate(
-                          offset: Offset(prevOffset, 0),
-                          child: _ArtworkCard(item: prevItem, size: artW),
-                        ),
-                      // Artwork courant
-                      Transform.translate(
-                        offset: Offset(currentOffset, 0),
-                        child: _ArtworkCard(item: item, size: artW),
+                      Text(
+                        item.title,
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      // Artwork suivant
-                      if (nextItem != null)
-                        Transform.translate(
-                          offset: Offset(nextOffset, 0),
-                          child: _ArtworkCard(item: nextItem, size: artW),
-                        ),
+                      const SizedBox(height: 4),
+                      Text(
+                        item.artist ?? '',
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                      ),
                     ],
                   ),
                 ),
               ),
             ),
+          ),
 
-            // ── Titre + artiste avec parallaxe ─────────────────────────────
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 250),
-                transitionBuilder: (child, anim) => SlideTransition(
-                  position: Tween<Offset>(
-                    begin: Offset(swipeDirection.toDouble(), 0),
-                    end: Offset.zero,
-                  ).animate(CurvedAnimation(
-                      parent: anim, curve: Curves.easeOutCubic)),
-                  child: FadeTransition(opacity: anim, child: child),
-                ),
-                child: Transform.translate(
-                  key: ValueKey(item.id),
-                  offset: Offset(titleOffset, 0),
-                  child: Opacity(
-                    opacity: titleOpacity,
-                    child: Column(
-                      children: [
-                        Text(
-                          item.title,
-                          style: Theme.of(context)
-                              .textTheme
-                              .headlineSmall
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          item.artist ?? '',
-                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+          // ── Slider de position ──────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: PlayerPositionSlider(
+              position: position,
+              duration: duration,
+              onSeek: handler.seek,
             ),
-
-            // ── Slider de position ──────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: PlayerPositionSlider(
-                position: position,
-                duration: duration,
-                onSeek: handler.seek,
-              ),
-            ),
-            Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 36),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(_fmt(position),
-                      style: Theme.of(context).textTheme.bodySmall),
-                  Text(_fmt(duration),
-                      style: Theme.of(context).textTheme.bodySmall),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // ── Contrôles de lecture ────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  IconButton(
-                    iconSize: 40,
-                    icon: const Icon(Icons.skip_previous),
-                    onPressed: handler.skipToPrevious,
-                  ),
-                  Container(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                    child: IconButton(
-                      iconSize: 48,
-                      color: Theme.of(context).colorScheme.onPrimary,
-                      icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
-                      onPressed: isPlaying ? handler.pause : handler.play,
-                    ),
-                  ),
-                  IconButton(
-                    iconSize: 40,
-                    icon: const Icon(Icons.skip_next),
-                    onPressed: handler.skipToNext,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-
-            // ── Boucle + shuffle ────────────────────────────────────────────
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 36),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                PlayerRepeatButton(
-                  loopState: loopState,
-                  onTap: handler.cycleTrackLoop,
-                ),
-                const SizedBox(width: 24),
+                Text(_fmt(position),
+                    style: Theme.of(context).textTheme.bodySmall),
+                Text(_fmt(duration),
+                    style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // ── Contrôles de lecture ────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
                 IconButton(
-                  icon: Icon(
-                    Icons.shuffle,
-                    color: shuffle
-                        ? Theme.of(context).colorScheme.primary
-                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                  iconSize: 40,
+                  icon: const Icon(Icons.skip_previous),
+                  onPressed: handler.skipToPrevious,
+                ),
+                Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Theme.of(context).colorScheme.primary,
                   ),
-                  onPressed: () => handler.setShuffle(!shuffle),
+                  child: IconButton(
+                    iconSize: 48,
+                    color: Theme.of(context).colorScheme.onPrimary,
+                    icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
+                    onPressed: isPlaying ? handler.pause : handler.play,
+                  ),
+                ),
+                IconButton(
+                  iconSize: 40,
+                  icon: const Icon(Icons.skip_next),
+                  onPressed: handler.skipToNext,
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 8),
+
+          // ── Boucle + shuffle ────────────────────────────────────────────
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              PlayerRepeatButton(
+                loopState: loopState,
+                onTap: handler.cycleTrackLoop,
+              ),
+              const SizedBox(width: 24),
+              IconButton(
+                icon: Icon(
+                  Icons.shuffle,
+                  color: shuffle
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                onPressed: () => handler.setShuffle(!shuffle),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
