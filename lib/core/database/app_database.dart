@@ -40,6 +40,7 @@ class PlaylistTracks extends Table {
   IntColumn get playlistId => integer().references(Playlists, #id, onDelete: KeyAction.cascade)();
   IntColumn get trackId => integer().references(Tracks, #id, onDelete: KeyAction.cascade)();
   IntColumn get position => integer()();
+  BoolColumn get isEnabled => boolean().withDefault(const Constant(true))();
 
   @override
   List<Set<Column>> get uniqueKeys => [
@@ -57,7 +58,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(driftDatabase(name: 'sonlite.db'));
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -65,6 +66,9 @@ class AppDatabase extends _$AppDatabase {
     onUpgrade: (m, from, to) async {
       if (from < 2) {
         await m.addColumn(tracks, tracks.originalThumbnailPath);
+      }
+      if (from < 3) {
+        await m.addColumn(playlistTracks, playlistTracks.isEnabled);
       }
     },
   );

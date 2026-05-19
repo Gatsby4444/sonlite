@@ -1,20 +1,24 @@
 import 'dart:io';
+import 'dart:ui';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../core/database/app_database.dart';
+import '../../core/database/playlists_dao.dart';
 import '../../core/database/playlist_repository.dart';
 import '../../core/database/track_repository.dart';
 import '../../core/services/image_service.dart';
 import '../../features/player/providers/player_providers.dart';
+import '../../features/player/providers/player_expansion_provider.dart';
 import '../shared/track_art.dart';
 
 part 'playlists_screen.g.dart';
 
 @riverpod
-Future<List<Track>> playlistTracks(Ref ref, int playlistId) {
+Future<List<PlaylistTrackEntry>> playlistTracks(Ref ref, int playlistId) {
   return ref.watch(playlistRepositoryProvider.notifier).getTracksForPlaylist(playlistId);
 }
 
@@ -350,7 +354,8 @@ class PlaylistDetailScreen extends ConsumerStatefulWidget {
 
 class _PlaylistDetailScreenState
     extends ConsumerState<PlaylistDetailScreen> {
-  List<Track>? _tracks;
+  List<PlaylistTrackEntry>? _tracks;
+  bool _settingsMode = false;
 
   @override
   void initState() {
@@ -371,6 +376,15 @@ class _PlaylistDetailScreenState
     final hasImage = widget.playlist.thumbnailPath != null;
 
     final actions = [
+      if (tracks != null && tracks.isNotEmpty)
+        IconButton(
+          icon: Icon(
+            _settingsMode ? Icons.tune : Icons.tune_outlined,
+            color: _settingsMode ? Theme.of(context).colorScheme.primary : null,
+          ),
+          tooltip: 'Activer/désactiver des morceaux',
+          onPressed: () => setState(() => _settingsMode = !_settingsMode),
+        ),
       IconButton(
         icon: const Icon(Icons.add),
         tooltip: 'Ajouter des titres',
@@ -425,15 +439,18 @@ class _PlaylistDetailScreenState
                     child: Text('Aucun titre dans cette playlist'))
                 : ReorderableListView.builder(
                     itemCount: tracks.length,
-                    onReorder: _reorder,
+                    onReorder: _settingsMode ? (_, __) {} : _reorder,
+                    buildDefaultDragHandles: !_settingsMode,
                     itemBuilder: (_, i) {
-                      final track = tracks[i];
+                      final entry = tracks[i];
                       return _PlaylistTrackTile(
-                        key: ValueKey(track.id),
-                        track: track,
+                        key: ValueKey(entry.track.id),
+                        entry: entry,
                         index: i,
-                        onRemove: () => _confirmRemoveTrack(track),
+                        settingsMode: _settingsMode,
+                        onRemove: () => _confirmRemoveTrack(entry),
                         onPlay: () => _playFrom(tracks, i),
+                        onToggleEnabled: (enabled) => _toggleTrack(entry, enabled),
                       );
                     },
                   ),
@@ -443,23 +460,23 @@ class _PlaylistDetailScreenState
 
   Future<void> _reorder(int oldIndex, int newIndex) async {
     if (_tracks == null) return;
-    final tracks = List<Track>.from(_tracks!);
+    final tracks = List<PlaylistTrackEntry>.from(_tracks!);
     if (newIndex > oldIndex) newIndex--;
     final item = tracks.removeAt(oldIndex);
     tracks.insert(newIndex, item);
     setState(() => _tracks = tracks);
     await ref.read(playlistRepositoryProvider.notifier).reorderTracks(
           widget.playlist.id,
-          tracks.map((t) => t.id).toList(),
+          tracks.map((e) => e.track.id).toList(),
         );
   }
 
-  void _confirmRemoveTrack(Track track) {
+  void _confirmRemoveTrack(PlaylistTrackEntry entry) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Retirer de la playlist'),
-        content: Text('Retirer "${track.title}" de cette playlist ?'),
+        content: Text('Retirer "${entry.track.title}" de cette playlist ?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
@@ -469,7 +486,7 @@ class _PlaylistDetailScreenState
               Navigator.pop(ctx);
               await ref
                   .read(playlistRepositoryProvider.notifier)
-                  .removeTrack(widget.playlist.id, track.id);
+                  .removeTrack(widget.playlist.id, entry.track.id);
               _loadTracks();
             },
             child: const Text('Retirer',
@@ -480,14 +497,27 @@ class _PlaylistDetailScreenState
     );
   }
 
-  void _playFrom(List<Track> tracks, int index) {
-    final handler = ref.read(audioHandlerProvider);
-    final queue = tracks.map(trackToMediaItem).toList();
-    handler.updateQueue(queue).then((_) => handler.skipToQueueItem(index));
-    context.push('/player');
+  Future<void> _toggleTrack(PlaylistTrackEntry entry, bool enabled) async {
+    await ref
+        .read(playlistRepositoryProvider.notifier)
+        .setTrackEnabled(widget.playlist.id, entry.track.id, enabled: enabled);
+    _loadTracks();
   }
 
-  void _playAll(List<Track> tracks) => _playFrom(tracks, 0);
+  void _playFrom(List<PlaylistTrackEntry> entries, int index) {
+    // Ne jouer que les pistes activées, en commençant à la piste cliquée si elle est activée
+    final enabledEntries = entries.where((e) => e.isEnabled).toList();
+    if (enabledEntries.isEmpty) return;
+    final handler = ref.read(audioHandlerProvider);
+    final queue = enabledEntries.map((e) => trackToMediaItem(e.track)).toList();
+    // Trouver l'index dans la queue filtrée (ou 0 si la piste est désactivée)
+    final clickedTrack = entries[index].track;
+    final queueIndex = enabledEntries.indexWhere((e) => e.track.id == clickedTrack.id);
+    handler.updateQueue(queue).then((_) => handler.skipToQueueItem(queueIndex < 0 ? 0 : queueIndex));
+    ref.read(playerExpandedProvider.notifier).state = true;
+  }
+
+  void _playAll(List<PlaylistTrackEntry> entries) => _playFrom(entries, 0);
 
   void _showAddTracksSheet(BuildContext context) {
     showModalBottomSheet(
@@ -504,50 +534,88 @@ class _PlaylistDetailScreenState
 // ─── Tuile d'un titre dans la playlist ───────────────────────────────────────
 
 class _PlaylistTrackTile extends ConsumerWidget {
-  final Track track;
+  final PlaylistTrackEntry entry;
   final int index;
+  final bool settingsMode;
   final VoidCallback onRemove;
   final VoidCallback onPlay;
+  final ValueChanged<bool> onToggleEnabled;
 
   const _PlaylistTrackTile({
     super.key,
-    required this.track,
+    required this.entry,
     required this.index,
+    required this.settingsMode,
     required this.onRemove,
     required this.onPlay,
+    required this.onToggleEnabled,
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return ListTile(
-      onTap: onPlay,
+    final track = entry.track;
+    final isEnabled = entry.isEnabled;
+
+    Widget tile = ListTile(
+      onTap: settingsMode ? null : onPlay,
       leading: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          ReorderableDragStartListener(
-            index: index,
-            child: const Padding(
-              padding: EdgeInsets.only(right: 8),
-              child: Icon(Icons.drag_handle,
-                  color: Colors.grey),
-            ),
-          ),
+          if (!settingsMode)
+            ReorderableDragStartListener(
+              index: index,
+              child: const Padding(
+                padding: EdgeInsets.only(right: 8),
+                child: Icon(Icons.drag_handle, color: Colors.grey),
+              ),
+            )
+          else
+            const SizedBox(width: 32),
           TrackArt(thumbnailPath: track.thumbnailPath),
         ],
       ),
-      title: Text(track.title,
-          maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(track.artist,
-          maxLines: 1, overflow: TextOverflow.ellipsis),
-      trailing: PopupMenuButton<String>(
-        onSelected: (v) => _onMenu(v, context, ref),
-        itemBuilder: (_) => const [
-          PopupMenuItem(
-              value: 'remove', child: Text('Retirer de la playlist')),
-          PopupMenuItem(value: 'edit', child: Text('Éditer')),
-        ],
-      ),
+      title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(track.artist, maxLines: 1, overflow: TextOverflow.ellipsis),
+      trailing: settingsMode
+          ? CupertinoSwitch(
+              value: isEnabled,
+              onChanged: onToggleEnabled,
+              activeTrackColor: Theme.of(context).colorScheme.primary,
+            )
+          : PopupMenuButton<String>(
+              onSelected: (v) => _onMenu(v, context, ref),
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                    value: 'remove', child: Text('Retirer de la playlist')),
+                PopupMenuItem(value: 'edit', child: Text('Éditer')),
+              ],
+            ),
     );
+
+    if (!isEnabled) {
+      tile = Stack(
+        children: [
+          tile,
+          Positioned.fill(
+            child: ClipRect(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 1.2, sigmaY: 1.2),
+                child: Opacity(opacity: 0.0, child: Container()),
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: IgnorePointer(
+              ignoring: !settingsMode,
+              child: Opacity(opacity: 0.0, child: Container()),
+            ),
+          ),
+        ],
+      );
+      tile = Opacity(opacity: 0.45, child: tile);
+    }
+
+    return tile;
   }
 
   void _onMenu(String value, BuildContext context, WidgetRef ref) {
@@ -555,7 +623,7 @@ class _PlaylistTrackTile extends ConsumerWidget {
       case 'remove':
         onRemove();
       case 'edit':
-        context.push('/editor/${track.id}');
+        context.push('/editor/${entry.track.id}');
     }
   }
 }

@@ -1,8 +1,6 @@
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:uuid/uuid.dart';
 
@@ -69,20 +67,6 @@ class StartupService {
     return id;
   }
 
-  Future<String?> _getInstalledYtDlpVersion() async {
-    // Essayer d'obtenir la version du binaire embarqué
-    try {
-      final docs = await getApplicationDocumentsDirectory();
-      final libDir = Directory('${docs.parent.path}/lib');
-      final ytdlpPath = '${libDir.path}/libytdlp.so';
-
-      if (await File(ytdlpPath).exists()) {
-        final result = await Process.run(ytdlpPath, ['--version']);
-        if (result.exitCode == 0) {
-          return (result.stdout as String).trim();
-        }
-      }
-    } catch (_) {}
-    return await _storage.read(key: _ytdlpVersionKey);
-  }
+  Future<String?> _getInstalledYtDlpVersion() =>
+      _storage.read(key: _ytdlpVersionKey);
 }

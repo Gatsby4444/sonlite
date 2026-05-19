@@ -7,6 +7,7 @@ import '../../core/database/playlist_repository.dart';
 import '../../core/database/track_repository.dart';
 import '../../core/services/import_service.dart';
 import '../../features/player/providers/player_providers.dart';
+import '../../features/player/providers/player_expansion_provider.dart';
 import '../shared/track_art.dart';
 
 class LibraryScreen extends ConsumerWidget {
@@ -126,7 +127,7 @@ class TrackTile extends ConsumerWidget {
     final handler = ref.read(audioHandlerProvider);
     final queue = allTracks.map(trackToMediaItem).toList();
     handler.updateQueue(queue).then((_) => handler.skipToQueueItem(index));
-    context.push('/player');
+    ref.read(playerExpandedProvider.notifier).state = true;
   }
 
   void _onMenuSelected(String value, BuildContext context, WidgetRef ref) {

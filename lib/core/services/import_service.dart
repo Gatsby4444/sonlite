@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_media_metadata/flutter_media_metadata.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -52,7 +53,9 @@ class ImportService {
     Metadata? meta;
     try {
       meta = await MetadataRetriever.fromFile(File(destPath));
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[import] metadata extraction failed: $e');
+    }
 
     final title = (meta?.trackName?.isNotEmpty == true)
         ? meta!.trackName!
@@ -70,7 +73,9 @@ class ImportService {
         );
         await thumbFile.writeAsBytes(meta!.albumArt!);
         thumbnailPath = thumbFile.path;
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[import] thumbnail save failed: $e');
+      }
     }
 
     final id = await _ref.read(tracksDaoProvider).insertTrack(

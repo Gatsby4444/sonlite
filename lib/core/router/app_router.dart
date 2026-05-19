@@ -5,13 +5,13 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../features/auth/login_screen.dart';
 import '../../features/library/library_screen.dart';
-import '../../features/player/player_screen.dart';
-import '../../features/player/widgets/mini_player.dart';
 import '../../features/playlists/playlists_screen.dart';
 import '../../features/downloader/downloader_screen.dart';
 import '../../features/editor/editor_screen.dart';
 import '../../features/editor/modify_screen.dart';
 import '../../features/settings/settings_screen.dart';
+import '../../features/player/unified_player_sheet.dart';
+import '../../features/player/providers/player_providers.dart';
 
 part 'app_router.g.dart';
 
@@ -36,10 +36,6 @@ GoRouter appRouter(Ref ref) {
             builder: (context, state) => const DownloaderScreen(),
           ),
         ],
-      ),
-      GoRoute(
-        path: '/player',
-        builder: (context, state) => const PlayerScreen(),
       ),
       GoRoute(
         path: '/editor/:trackId',
@@ -67,22 +63,33 @@ GoRouter appRouter(Ref ref) {
   );
 }
 
-class AppShell extends StatelessWidget {
+class AppShell extends ConsumerWidget {
   final Widget child;
   const AppShell({super.key, required this.child});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final location = GoRouterState.of(context).uri.path;
     int currentIndex = 0;
     if (location.startsWith('/playlists')) currentIndex = 1;
     if (location.startsWith('/download')) currentIndex = 2;
 
+    final item = ref.watch(currentMediaItemProvider).valueOrNull;
+    final hasPlayer = item != null;
+
     return Scaffold(
-      body: Column(
+      body: Stack(
         children: [
-          Expanded(child: child),
-          const MiniPlayer(),
+          Column(
+            children: [
+              Expanded(child: child),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                height: hasPlayer ? 72.0 : 0.0,
+              ),
+            ],
+          ),
+          const UnifiedPlayerSheet(),
         ],
       ),
       bottomNavigationBar: NavigationBar(

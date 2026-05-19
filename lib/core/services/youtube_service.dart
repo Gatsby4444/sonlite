@@ -176,7 +176,9 @@ class YoutubeService {
       if (thumbnailUrl != null && thumbnailUrl.startsWith('http')) {
         try {
           thumbnailPath = await _downloadThumbnail(thumbnailUrl, safeTitle, musicDir);
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('[download] thumbnail failed: $e');
+        }
       }
 
       // 6. Enregistrement en base

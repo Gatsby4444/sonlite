@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -14,8 +15,20 @@ class FfmpegService {
   static const _channel = MethodChannel('com.sonlite/ffmpeg');
 
   Future<bool> _execute(List<String> args) async {
-    final rc = await _channel.invokeMethod<int>('execute', {'args': args});
-    return rc == 0;
+    try {
+      final rc = await _channel.invokeMethod<int>('execute', {'args': args});
+      return rc == 0;
+    } on PlatformException catch (e) {
+      debugPrint('[ffmpeg] PlatformException: ${e.code} — ${e.message}');
+      return false;
+    }
+  }
+
+  /// Initialise FFmpeg en arrière-plan pour éviter le délai au premier trim.
+  Future<void> preWarm() async {
+    try {
+      await _execute(['-version']);
+    } catch (_) {}
   }
 
   Future<Directory> _exportsDir() async {

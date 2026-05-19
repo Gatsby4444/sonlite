@@ -41,8 +41,12 @@ class PlaylistRepository extends _$PlaylistRepository {
     return ref.read(playlistsDaoProvider).removeTrackFromPlaylist(playlistId, trackId);
   }
 
-  Future<List<Track>> getTracksForPlaylist(int playlistId) {
+  Future<List<PlaylistTrackEntry>> getTracksForPlaylist(int playlistId) {
     return ref.read(playlistsDaoProvider).getTracksForPlaylist(playlistId);
+  }
+
+  Future<void> setTrackEnabled(int playlistId, int trackId, {required bool enabled}) {
+    return ref.read(playlistsDaoProvider).setTrackEnabled(playlistId, trackId, enabled);
   }
 
   Future<void> updatePlaylist(int id, String name, {String? thumbnailPath}) {

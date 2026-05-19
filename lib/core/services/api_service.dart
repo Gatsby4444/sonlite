@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -110,8 +111,12 @@ class _AuthInterceptor extends Interceptor {
           handler.resolve(retried);
           return;
         }
-      } catch (_) {
-        await _storage.deleteAll();
+      } catch (e) {
+        if (e is DioException &&
+            (e.response?.statusCode == 401 || e.response?.statusCode == 403)) {
+          await _storage.deleteAll();
+        }
+        debugPrint('[auth] token refresh failed: $e');
       } finally {
         _refreshing = false;
       }

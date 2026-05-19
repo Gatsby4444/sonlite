@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:audio_waveforms/audio_waveforms.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,6 +19,7 @@ class EditorScreen extends ConsumerStatefulWidget {
 
 class _EditorScreenState extends ConsumerState<EditorScreen> {
   late PlayerController _waveCtrl;
+  StreamSubscription<int>? _playheadSub;
   final ValueNotifier<int> _playheadNotifier = ValueNotifier(0);
 
   Track? _track;
@@ -38,6 +40,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
 
   @override
   void dispose() {
+    _playheadSub?.cancel();
     _waveCtrl.stopPlayer();
     _waveCtrl.dispose();
     _playheadNotifier.dispose();
@@ -69,10 +72,14 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
 
   Future<void> _initPlayer(String path) async {
     try {
-      // 500 samples : bien plus de détail sur la waveform
-      await _waveCtrl.preparePlayer(
-          path: path, noOfSamples: 500, volume: 1.0);
+      await _waveCtrl.preparePlayer(path: path, noOfSamples: 500, volume: 1.0);
+      // Synchronise le curseur visuel avec la position de lecture en temps réel
+      _playheadSub = _waveCtrl.onCurrentDurationChanged.listen((ms) {
+        if (mounted) _playheadNotifier.value = ms;
+      }, cancelOnError: true);
       if (mounted) setState(() => _playerReady = true);
+      // Pre-warm FFmpeg en arrière-plan pour éviter le délai au premier trim
+      unawaited(ref.read(ffmpegServiceProvider).preWarm());
     } catch (_) {}
   }
 
@@ -108,7 +115,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     await _waveCtrl.pausePlayer();
     setState(() {
       _loading = true;
-      _status = null;
+      _status = 'Traitement FFmpeg en cours…';
     });
     try {
       final outPath = await ref.read(ffmpegServiceProvider).trim(

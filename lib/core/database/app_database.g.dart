@@ -1177,8 +1177,29 @@ class $PlaylistTracksTable extends PlaylistTracks
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _isEnabledMeta = const VerificationMeta(
+    'isEnabled',
+  );
   @override
-  List<GeneratedColumn> get $columns => [id, playlistId, trackId, position];
+  late final GeneratedColumn<bool> isEnabled = GeneratedColumn<bool>(
+    'is_enabled',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_enabled" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    playlistId,
+    trackId,
+    position,
+    isEnabled,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -1218,6 +1239,12 @@ class $PlaylistTracksTable extends PlaylistTracks
     } else if (isInserting) {
       context.missing(_positionMeta);
     }
+    if (data.containsKey('is_enabled')) {
+      context.handle(
+        _isEnabledMeta,
+        isEnabled.isAcceptableOrUnknown(data['is_enabled']!, _isEnabledMeta),
+      );
+    }
     return context;
   }
 
@@ -1247,6 +1274,10 @@ class $PlaylistTracksTable extends PlaylistTracks
         DriftSqlType.int,
         data['${effectivePrefix}position'],
       )!,
+      isEnabled: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_enabled'],
+      )!,
     );
   }
 
@@ -1261,11 +1292,13 @@ class PlaylistTrack extends DataClass implements Insertable<PlaylistTrack> {
   final int playlistId;
   final int trackId;
   final int position;
+  final bool isEnabled;
   const PlaylistTrack({
     required this.id,
     required this.playlistId,
     required this.trackId,
     required this.position,
+    required this.isEnabled,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1274,6 +1307,7 @@ class PlaylistTrack extends DataClass implements Insertable<PlaylistTrack> {
     map['playlist_id'] = Variable<int>(playlistId);
     map['track_id'] = Variable<int>(trackId);
     map['position'] = Variable<int>(position);
+    map['is_enabled'] = Variable<bool>(isEnabled);
     return map;
   }
 
@@ -1283,6 +1317,7 @@ class PlaylistTrack extends DataClass implements Insertable<PlaylistTrack> {
       playlistId: Value(playlistId),
       trackId: Value(trackId),
       position: Value(position),
+      isEnabled: Value(isEnabled),
     );
   }
 
@@ -1296,6 +1331,7 @@ class PlaylistTrack extends DataClass implements Insertable<PlaylistTrack> {
       playlistId: serializer.fromJson<int>(json['playlistId']),
       trackId: serializer.fromJson<int>(json['trackId']),
       position: serializer.fromJson<int>(json['position']),
+      isEnabled: serializer.fromJson<bool>(json['isEnabled']),
     );
   }
   @override
@@ -1306,6 +1342,7 @@ class PlaylistTrack extends DataClass implements Insertable<PlaylistTrack> {
       'playlistId': serializer.toJson<int>(playlistId),
       'trackId': serializer.toJson<int>(trackId),
       'position': serializer.toJson<int>(position),
+      'isEnabled': serializer.toJson<bool>(isEnabled),
     };
   }
 
@@ -1314,11 +1351,13 @@ class PlaylistTrack extends DataClass implements Insertable<PlaylistTrack> {
     int? playlistId,
     int? trackId,
     int? position,
+    bool? isEnabled,
   }) => PlaylistTrack(
     id: id ?? this.id,
     playlistId: playlistId ?? this.playlistId,
     trackId: trackId ?? this.trackId,
     position: position ?? this.position,
+    isEnabled: isEnabled ?? this.isEnabled,
   );
   PlaylistTrack copyWithCompanion(PlaylistTracksCompanion data) {
     return PlaylistTrack(
@@ -1328,6 +1367,7 @@ class PlaylistTrack extends DataClass implements Insertable<PlaylistTrack> {
           : this.playlistId,
       trackId: data.trackId.present ? data.trackId.value : this.trackId,
       position: data.position.present ? data.position.value : this.position,
+      isEnabled: data.isEnabled.present ? data.isEnabled.value : this.isEnabled,
     );
   }
 
@@ -1337,13 +1377,14 @@ class PlaylistTrack extends DataClass implements Insertable<PlaylistTrack> {
           ..write('id: $id, ')
           ..write('playlistId: $playlistId, ')
           ..write('trackId: $trackId, ')
-          ..write('position: $position')
+          ..write('position: $position, ')
+          ..write('isEnabled: $isEnabled')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, playlistId, trackId, position);
+  int get hashCode => Object.hash(id, playlistId, trackId, position, isEnabled);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1351,7 +1392,8 @@ class PlaylistTrack extends DataClass implements Insertable<PlaylistTrack> {
           other.id == this.id &&
           other.playlistId == this.playlistId &&
           other.trackId == this.trackId &&
-          other.position == this.position);
+          other.position == this.position &&
+          other.isEnabled == this.isEnabled);
 }
 
 class PlaylistTracksCompanion extends UpdateCompanion<PlaylistTrack> {
@@ -1359,17 +1401,20 @@ class PlaylistTracksCompanion extends UpdateCompanion<PlaylistTrack> {
   final Value<int> playlistId;
   final Value<int> trackId;
   final Value<int> position;
+  final Value<bool> isEnabled;
   const PlaylistTracksCompanion({
     this.id = const Value.absent(),
     this.playlistId = const Value.absent(),
     this.trackId = const Value.absent(),
     this.position = const Value.absent(),
+    this.isEnabled = const Value.absent(),
   });
   PlaylistTracksCompanion.insert({
     this.id = const Value.absent(),
     required int playlistId,
     required int trackId,
     required int position,
+    this.isEnabled = const Value.absent(),
   }) : playlistId = Value(playlistId),
        trackId = Value(trackId),
        position = Value(position);
@@ -1378,12 +1423,14 @@ class PlaylistTracksCompanion extends UpdateCompanion<PlaylistTrack> {
     Expression<int>? playlistId,
     Expression<int>? trackId,
     Expression<int>? position,
+    Expression<bool>? isEnabled,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (playlistId != null) 'playlist_id': playlistId,
       if (trackId != null) 'track_id': trackId,
       if (position != null) 'position': position,
+      if (isEnabled != null) 'is_enabled': isEnabled,
     });
   }
 
@@ -1392,12 +1439,14 @@ class PlaylistTracksCompanion extends UpdateCompanion<PlaylistTrack> {
     Value<int>? playlistId,
     Value<int>? trackId,
     Value<int>? position,
+    Value<bool>? isEnabled,
   }) {
     return PlaylistTracksCompanion(
       id: id ?? this.id,
       playlistId: playlistId ?? this.playlistId,
       trackId: trackId ?? this.trackId,
       position: position ?? this.position,
+      isEnabled: isEnabled ?? this.isEnabled,
     );
   }
 
@@ -1416,6 +1465,9 @@ class PlaylistTracksCompanion extends UpdateCompanion<PlaylistTrack> {
     if (position.present) {
       map['position'] = Variable<int>(position.value);
     }
+    if (isEnabled.present) {
+      map['is_enabled'] = Variable<bool>(isEnabled.value);
+    }
     return map;
   }
 
@@ -1425,7 +1477,8 @@ class PlaylistTracksCompanion extends UpdateCompanion<PlaylistTrack> {
           ..write('id: $id, ')
           ..write('playlistId: $playlistId, ')
           ..write('trackId: $trackId, ')
-          ..write('position: $position')
+          ..write('position: $position, ')
+          ..write('isEnabled: $isEnabled')
           ..write(')'))
         .toString();
   }
@@ -2231,6 +2284,7 @@ typedef $$PlaylistTracksTableCreateCompanionBuilder =
       required int playlistId,
       required int trackId,
       required int position,
+      Value<bool> isEnabled,
     });
 typedef $$PlaylistTracksTableUpdateCompanionBuilder =
     PlaylistTracksCompanion Function({
@@ -2238,6 +2292,7 @@ typedef $$PlaylistTracksTableUpdateCompanionBuilder =
       Value<int> playlistId,
       Value<int> trackId,
       Value<int> position,
+      Value<bool> isEnabled,
     });
 
 final class $$PlaylistTracksTableReferences
@@ -2302,6 +2357,11 @@ class $$PlaylistTracksTableFilterComposer
 
   ColumnFilters<int> get position => $composableBuilder(
     column: $table.position,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isEnabled => $composableBuilder(
+    column: $table.isEnabled,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2371,6 +2431,11 @@ class $$PlaylistTracksTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<bool> get isEnabled => $composableBuilder(
+    column: $table.isEnabled,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$PlaylistsTableOrderingComposer get playlistId {
     final $$PlaylistsTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -2432,6 +2497,9 @@ class $$PlaylistTracksTableAnnotationComposer
 
   GeneratedColumn<int> get position =>
       $composableBuilder(column: $table.position, builder: (column) => column);
+
+  GeneratedColumn<bool> get isEnabled =>
+      $composableBuilder(column: $table.isEnabled, builder: (column) => column);
 
   $$PlaylistsTableAnnotationComposer get playlistId {
     final $$PlaylistsTableAnnotationComposer composer = $composerBuilder(
@@ -2514,11 +2582,13 @@ class $$PlaylistTracksTableTableManager
                 Value<int> playlistId = const Value.absent(),
                 Value<int> trackId = const Value.absent(),
                 Value<int> position = const Value.absent(),
+                Value<bool> isEnabled = const Value.absent(),
               }) => PlaylistTracksCompanion(
                 id: id,
                 playlistId: playlistId,
                 trackId: trackId,
                 position: position,
+                isEnabled: isEnabled,
               ),
           createCompanionCallback:
               ({
@@ -2526,11 +2596,13 @@ class $$PlaylistTracksTableTableManager
                 required int playlistId,
                 required int trackId,
                 required int position,
+                Value<bool> isEnabled = const Value.absent(),
               }) => PlaylistTracksCompanion.insert(
                 id: id,
                 playlistId: playlistId,
                 trackId: trackId,
                 position: position,
+                isEnabled: isEnabled,
               ),
           withReferenceMapper: (p0) => p0
               .map(

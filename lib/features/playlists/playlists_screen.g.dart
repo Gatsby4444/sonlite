@@ -6,7 +6,7 @@ part of 'playlists_screen.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$playlistTracksHash() => r'ee0de0e0b0f9214762b814ac29f05ce136b3d979';
+String _$playlistTracksHash() => r'a11ab634b5c59e3e42883064413ea8bff702118b';
 
 /// Copied from Dart SDK
 class _SystemHash {
@@ -34,7 +34,8 @@ class _SystemHash {
 const playlistTracksProvider = PlaylistTracksFamily();
 
 /// See also [playlistTracks].
-class PlaylistTracksFamily extends Family<AsyncValue<List<Track>>> {
+class PlaylistTracksFamily
+    extends Family<AsyncValue<List<PlaylistTrackEntry>>> {
   /// See also [playlistTracks].
   const PlaylistTracksFamily();
 
@@ -66,7 +67,8 @@ class PlaylistTracksFamily extends Family<AsyncValue<List<Track>>> {
 }
 
 /// See also [playlistTracks].
-class PlaylistTracksProvider extends AutoDisposeFutureProvider<List<Track>> {
+class PlaylistTracksProvider
+    extends AutoDisposeFutureProvider<List<PlaylistTrackEntry>> {
   /// See also [playlistTracks].
   PlaylistTracksProvider(int playlistId)
     : this._internal(
@@ -96,7 +98,8 @@ class PlaylistTracksProvider extends AutoDisposeFutureProvider<List<Track>> {
 
   @override
   Override overrideWith(
-    FutureOr<List<Track>> Function(PlaylistTracksRef provider) create,
+    FutureOr<List<PlaylistTrackEntry>> Function(PlaylistTracksRef provider)
+    create,
   ) {
     return ProviderOverride(
       origin: this,
@@ -113,7 +116,7 @@ class PlaylistTracksProvider extends AutoDisposeFutureProvider<List<Track>> {
   }
 
   @override
-  AutoDisposeFutureProviderElement<List<Track>> createElement() {
+  AutoDisposeFutureProviderElement<List<PlaylistTrackEntry>> createElement() {
     return _PlaylistTracksProviderElement(this);
   }
 
@@ -133,13 +136,14 @@ class PlaylistTracksProvider extends AutoDisposeFutureProvider<List<Track>> {
 
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
-mixin PlaylistTracksRef on AutoDisposeFutureProviderRef<List<Track>> {
+mixin PlaylistTracksRef
+    on AutoDisposeFutureProviderRef<List<PlaylistTrackEntry>> {
   /// The parameter `playlistId` of this provider.
   int get playlistId;
 }
 
 class _PlaylistTracksProviderElement
-    extends AutoDisposeFutureProviderElement<List<Track>>
+    extends AutoDisposeFutureProviderElement<List<PlaylistTrackEntry>>
     with PlaylistTracksRef {
   _PlaylistTracksProviderElement(super.provider);
 
