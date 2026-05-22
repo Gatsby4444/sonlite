@@ -10,6 +10,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../database/app_database.dart';
 import '../database/track_repository.dart';
+import 'log_service.dart';
 
 part 'import_service.g.dart';
 
@@ -42,12 +43,33 @@ class ImportService {
   Future<Track?> importFromPath(String sourcePath) =>
       _importFile(sourcePath);
 
+  /// Génère un destPath qui n'écrase pas un fichier existant.
+  /// foo.mp3 → foo.mp3 ; si présent → foo_1.mp3 ; etc.
+  String _uniqueDestPath(String dirPath, String fileName) {
+    final stem = p.basenameWithoutExtension(fileName);
+    final ext = p.extension(fileName);
+    var candidate = p.join(dirPath, fileName);
+    var i = 1;
+    while (File(candidate).existsSync()) {
+      candidate = p.join(dirPath, '${stem}_$i$ext');
+      i++;
+    }
+    return candidate;
+  }
+
   Future<Track?> _importFile(String sourcePath) async {
     final musicDir = await _getMusicDir();
     final fileName = p.basename(sourcePath);
-    final destPath = p.join(musicDir.path, fileName);
+    // Sans ça, deux imports portant le même nom → File.copy écrase + deux
+    // entrées Track partagent le même filePath = bug de swipe bloqué.
+    final destPath = _uniqueDestPath(musicDir.path, fileName);
+    if (destPath != p.join(musicDir.path, fileName)) {
+      appLog('collision de nom : $fileName → ${p.basename(destPath)}',
+          level: LogLevel.warn, source: 'import');
+    }
 
     await File(sourcePath).copy(destPath);
+    appLog('import : ${p.basename(destPath)}', source: 'import');
 
     // Extraction des métadonnées
     Metadata? meta;

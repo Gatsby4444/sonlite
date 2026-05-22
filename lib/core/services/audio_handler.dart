@@ -3,6 +3,8 @@ import 'dart:math';
 import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
 
+import 'log_service.dart';
+
 enum AudioLoopMode { off, all, oneWithCount }
 
 class SonLiteAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
@@ -58,23 +60,32 @@ class SonLiteAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandle
   @override
   Future<void> seek(Duration position) => _player.seek(position);
 
-  // Recherche d'index robuste : MediaItem.== est basée sur id mais si l'instance
-  // dans la queue diffère de mediaItem.value (rebuild, deserialization), indexOf
-  // peut échouer. On compare explicitement les id.
+  // MediaItem.== compare par id (= filePath). Si la base contient deux Track
+  // pointant vers le même filePath (collision de noms de fichiers lors d'imports
+  // ou téléchargements simultanés), indexOf renvoie toujours le PREMIER match
+  // → le swipe boucle sur les mêmes pistes. On compare par trackId (unique en
+  // base) via extras pour rester robuste à ces doublons.
   int _indexOfCurrent() {
     final current = mediaItem.value;
     if (current == null) return -1;
+    final currentTid = current.extras?['trackId'];
     final q = queue.value;
-    for (int i = 0; i < q.length; i++) {
-      if (q[i].id == current.id) return i;
+    if (currentTid != null) {
+      for (int i = 0; i < q.length; i++) {
+        if (q[i].extras?['trackId'] == currentTid) return i;
+      }
     }
-    return -1;
+    return q.indexOf(current);
   }
 
   @override
   Future<void> skipToNext() async {
-    if (queue.value.isEmpty) return;
+    if (queue.value.isEmpty) {
+      appLog('skipToNext : queue vide', level: LogLevel.warn, source: 'audio');
+      return;
+    }
     final currentIndex = _indexOfCurrent();
+    appLog('skipToNext (depuis index=$currentIndex)', source: 'audio');
 
     if (_loopMode == AudioLoopMode.oneWithCount) {
       if (_repeatTotal == 0 || _repeatRemaining > 0) {
@@ -107,8 +118,7 @@ class SonLiteAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandle
   @override
   Future<void> skipToPrevious() async {
     if (queue.value.isEmpty) return;
-    final currentIndex = _indexOfCurrent();
-    final newIndex = currentIndex >= 0 ? currentIndex - 1 : 0;
+    final newIndex = _indexOfCurrent() - 1;
     if (newIndex >= 0) {
       await skipToQueueItem(newIndex);
     }
@@ -119,22 +129,17 @@ class SonLiteAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandle
     if (index < 0 || index >= queue.value.length) return;
     final item = queue.value[index];
     final path = item.extras?['filePath'] as String? ?? item.id;
+    final tid = item.extras?['trackId'];
+    appLog('skipToQueueItem #$index (trackId=$tid) → ${item.title}',
+        source: 'audio');
+    mediaItem.add(item);
     try {
       await _player.setFilePath(path);
-      // mediaItem n'est mis à jour qu'après le succès du chargement : si le
-      // fichier est corrompu/absent, la queue ne se "désynchronise" pas et
-      // l'utilisateur reste sur la piste précédente (qui fonctionne).
-      mediaItem.add(item);
       await _player.play();
     } catch (e) {
-      // Lecture impossible : on tente la piste suivante automatiquement, sauf
-      // si on est déjà en boucle (pour éviter un skip infini si tout casse).
-      // ignore: avoid_print
-      print('[audio_handler] setFilePath failed for $path: $e');
-      await _player.stop();
-      if (index + 1 < queue.value.length && index != _indexOfCurrent()) {
-        await skipToQueueItem(index + 1);
-      }
+      appLog('setFilePath ÉCHEC : $e (path=$path)',
+          level: LogLevel.error, source: 'audio');
+      rethrow;
     }
   }
 

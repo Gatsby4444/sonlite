@@ -10,6 +10,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../database/app_database.dart';
 import '../database/track_repository.dart';
+import 'log_service.dart';
 
 part 'youtube_service.g.dart';
 
@@ -64,6 +65,7 @@ class YoutubeService {
     void Function(DownloadProgress) onProgress,
   ) async {
     onProgress(const DownloadProgress(status: DownloadStatus.fetching));
+    appLog('download : $url', source: 'youtube');
     StreamSubscription<dynamic>? progressSub;
 
     try {
@@ -99,7 +101,13 @@ class YoutubeService {
         progress: 0.1,
       ));
 
-      final safeTitle = _sanitizeFilename(title);
+      // Suffixe unique pour éviter deux téléchargements en parallèle (ou
+      // séquentiels avec même titre) qui se retrouveraient avec le même
+      // filePath en base. videoId est garanti unique par YouTube ; en
+      // fallback on prend un timestamp.
+      final uniqSuffix =
+          (videoId != null && videoId.isNotEmpty) ? videoId : DateTime.now().millisecondsSinceEpoch.toString();
+      final safeTitle = '${_sanitizeFilename(title)}_$uniqSuffix';
       final outputTemplate = p.join(musicDir.path, '$safeTitle.%(ext)s');
 
       // 2. Écoute de la progression — capture aussi le chemin du fichier final
@@ -170,6 +178,7 @@ class YoutubeService {
         throw Exception('Fichier audio introuvable après téléchargement');
       }
       debugPrint('[download] 6/7 fichier trouvé: $finalFilePath');
+      appLog('téléchargé → ${p.basename(finalFilePath)}', source: 'youtube');
 
       // 5. Miniature pour l'UI (séparée de celle embarquée dans le fichier)
       String? thumbnailPath;
@@ -207,6 +216,7 @@ class YoutubeService {
     } catch (e, st) {
       debugPrint('[download] ERREUR: $e');
       debugPrint('[download] STACK:\n$st');
+      appLog('ÉCHEC : $e', level: LogLevel.error, source: 'youtube');
       onProgress(DownloadProgress(
         status: DownloadStatus.error,
         error: e.toString(),

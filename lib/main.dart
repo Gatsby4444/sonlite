@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/providers/theme_provider.dart';
 import 'core/router/app_router.dart';
 import 'core/services/audio_handler.dart';
+import 'core/services/dedupe_service.dart';
+import 'core/services/log_service.dart';
 import 'core/services/startup_service.dart';
 import 'features/player/providers/player_providers.dart';
 
@@ -30,7 +34,11 @@ Future<void> main() async {
     ],
   );
 
+  appLog('app start (1.0.15)', source: 'main');
   container.read(startupServiceProvider).run();
+  // Nettoyage des doublons de filePath laissés par les versions ≤ 1.0.13.
+  // Sans ça, le bug "swipe bloqué" persiste sur les anciennes pistes.
+  unawaited(container.read(dedupeServiceProvider).dedupeFilePaths());
 
   runApp(
     UncontrolledProviderScope(

@@ -107,18 +107,6 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
         (_swipeCtrl.value + d.delta.dx / artW).clamp(-1.0, 1.0);
   }
 
-  void _onArtworkDragCancel() {
-    // La gesture arena a annulé le drag (autre recognizer a gagné, p.ex. vertical
-    // ou parent scroll). Sans ce handler, _isDragging restait true et _swipeCtrl
-    // restait à une valeur non nulle → swipe "bloqué" visuellement.
-    _isDragging = false;
-    if (_swipeCtrl.value != 0.0) {
-      _swipeCtrl.animateTo(0.0,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic);
-    }
-  }
-
   void _onArtworkDragEnd(DragEndDetails d, SonLiteAudioHandler handler) {
     _isDragging = false;
     final vx = d.velocity.pixelsPerSecond.dx;
@@ -225,7 +213,6 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
               onTapMini: _expand,
               onArtworkDragUpdate: _onArtworkDragUpdate,
               onArtworkDragEnd: _onArtworkDragEnd,
-              onArtworkDragCancel: _onArtworkDragCancel,
               onCollapse: _collapse,
             ),
           ),
@@ -248,7 +235,6 @@ class _PlayerContainer extends ConsumerWidget {
   final VoidCallback onTapMini;
   final GestureDragUpdateCallback onArtworkDragUpdate;
   final void Function(DragEndDetails, SonLiteAudioHandler) onArtworkDragEnd;
-  final VoidCallback onArtworkDragCancel;
   final VoidCallback onCollapse;
 
   const _PlayerContainer({
@@ -262,7 +248,6 @@ class _PlayerContainer extends ConsumerWidget {
     required this.onTapMini,
     required this.onArtworkDragUpdate,
     required this.onArtworkDragEnd,
-    required this.onArtworkDragCancel,
     required this.onCollapse,
   });
 
@@ -293,7 +278,6 @@ class _PlayerContainer extends ConsumerWidget {
               onCollapse: onCollapse,
               onArtworkDragUpdate: onArtworkDragUpdate,
               onArtworkDragEnd: (d) => onArtworkDragEnd(d, handler),
-              onArtworkDragCancel: onArtworkDragCancel,
             ),
     );
   }
@@ -371,7 +355,6 @@ class _FullContent extends ConsumerWidget {
   final VoidCallback onCollapse;
   final GestureDragUpdateCallback onArtworkDragUpdate;
   final GestureDragEndCallback onArtworkDragEnd;
-  final VoidCallback onArtworkDragCancel;
 
   const _FullContent({
     required this.item,
@@ -382,7 +365,6 @@ class _FullContent extends ConsumerWidget {
     required this.onCollapse,
     required this.onArtworkDragUpdate,
     required this.onArtworkDragEnd,
-    required this.onArtworkDragCancel,
   });
 
   @override
@@ -428,7 +410,6 @@ class _FullContent extends ConsumerWidget {
               behavior: HitTestBehavior.translucent,
               onHorizontalDragUpdate: onArtworkDragUpdate,
               onHorizontalDragEnd: onArtworkDragEnd,
-              onHorizontalDragCancel: onArtworkDragCancel,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
