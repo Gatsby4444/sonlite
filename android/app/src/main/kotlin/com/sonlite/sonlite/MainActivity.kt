@@ -191,36 +191,85 @@ class MainActivity : AudioServiceFragmentActivity() {
         throw IllegalArgumentException("Aucune piste audio trouvée dans le fichier")
     }
 
-    private fun trimAudio(inputPath: String, startMs: Long, endMs: Long, outputPath: String) {
-        val extractor = MediaExtractor()
-        extractor.setDataSource(inputPath)
-        val format = extractor.getTrackFormat(selectAudioTrack(extractor))
-
-        val muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        val muxTrack = muxer.addTrack(format)
-        extractor.seekTo(startMs * 1_000L, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-        muxer.start()
-
-        val buf = ByteBuffer.allocate(1 * 1024 * 1024)
-        val info = MediaCodec.BufferInfo()
-
-        while (true) {
-            info.size = extractor.readSampleData(buf, 0)
-            if (info.size < 0) break
-            val sampleUs = extractor.sampleTime
-            if (sampleUs > endMs * 1_000L) break
-            if (sampleUs >= startMs * 1_000L) {
-                info.offset = 0
-                info.presentationTimeUs = sampleUs - startMs * 1_000L
-                info.flags = extractor.sampleFlags
-                muxer.writeSampleData(muxTrack, buf, info)
+    /// Détecte le MIME audio du fichier sans démarrer l'extraction complète.
+    private fun probeAudioMime(inputPath: String): String? {
+        val ext = MediaExtractor()
+        return try {
+            ext.setDataSource(inputPath)
+            for (i in 0 until ext.trackCount) {
+                val mime = ext.getTrackFormat(i).getString(MediaFormat.KEY_MIME)
+                if (mime != null && mime.startsWith("audio/")) return mime
             }
-            extractor.advance()
+            null
+        } catch (_: Throwable) {
+            null
+        } finally {
+            ext.release()
         }
+    }
 
-        muxer.stop()
-        muxer.release()
-        extractor.release()
+    /// MediaMuxer (MP4) ne supporte que AAC. Pour MP3/OPUS/OGG/FLAC/etc.
+    /// on repasse par FFmpeg en stream-copy (rapide, pas de réencodage).
+    private fun trimAudio(inputPath: String, startMs: Long, endMs: Long, outputPath: String) {
+        val mime = probeAudioMime(inputPath)
+        if (mime == "audio/mp4a-latm" || mime == "audio/aac") {
+            trimAudioMuxer(inputPath, startMs, endMs, outputPath)
+        } else {
+            trimAudioFfmpeg(inputPath, startMs, endMs, outputPath)
+        }
+    }
+
+    private fun trimAudioMuxer(inputPath: String, startMs: Long, endMs: Long, outputPath: String) {
+        val extractor = MediaExtractor()
+        var muxer: MediaMuxer? = null
+        try {
+            extractor.setDataSource(inputPath)
+            val format = extractor.getTrackFormat(selectAudioTrack(extractor))
+
+            muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            val muxTrack = muxer.addTrack(format)
+            extractor.seekTo(startMs * 1_000L, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            muxer.start()
+
+            val buf = ByteBuffer.allocate(1 * 1024 * 1024)
+            val info = MediaCodec.BufferInfo()
+
+            while (true) {
+                info.size = extractor.readSampleData(buf, 0)
+                if (info.size < 0) break
+                val sampleUs = extractor.sampleTime
+                if (sampleUs > endMs * 1_000L) break
+                if (sampleUs >= startMs * 1_000L) {
+                    info.offset = 0
+                    info.presentationTimeUs = sampleUs - startMs * 1_000L
+                    info.flags = extractor.sampleFlags
+                    muxer.writeSampleData(muxTrack, buf, info)
+                }
+                extractor.advance()
+            }
+            muxer.stop()
+        } finally {
+            try { muxer?.release() } catch (_: Throwable) {}
+            extractor.release()
+        }
+    }
+
+    private fun trimAudioFfmpeg(inputPath: String, startMs: Long, endMs: Long, outputPath: String) {
+        ensureInitialized()
+        val bin = findFfmpegBin()
+            ?: throw IllegalStateException("Binaire FFmpeg introuvable — init() a peut-être échoué")
+        val startSec = startMs / 1000.0
+        val durSec = (endMs - startMs) / 1000.0
+        // -ss avant -i = seek rapide ; -c copy = stream copy (instantané, pas de réencodage)
+        runFfmpegBin(bin, listOf(
+            "-y",
+            "-ss", String.format(java.util.Locale.US, "%.3f", startSec),
+            "-i", inputPath,
+            "-t",  String.format(java.util.Locale.US, "%.3f", durSec),
+            "-vn",
+            "-c:a", "copy",
+            outputPath,
+        ))
     }
 
     /// Initialise yt-dlp + ffmpeg (extrait le runtime Python au premier appel).

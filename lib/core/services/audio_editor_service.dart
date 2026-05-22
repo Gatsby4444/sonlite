@@ -23,6 +23,15 @@ class AudioEditorService {
 
   /// Découpe [inputPath] entre [start] et [end] et ajoute le résultat à la
   /// bibliothèque. Retourne le chemin du fichier créé, ou null en cas d'erreur.
+  /// Choisit l'extension de sortie en conservant celle de l'entrée
+  /// (sauf pour .aac/.m4a → .m4a, pour rester cohérent avec MediaMuxer).
+  String _outputExtFor(String inputPath) {
+    final ext = p.extension(inputPath).toLowerCase();
+    if (ext.isEmpty) return '.m4a';
+    if (ext == '.aac') return '.m4a';
+    return ext;
+  }
+
   Future<String?> trim({
     required String inputPath,
     required Duration start,
@@ -32,7 +41,7 @@ class AudioEditorService {
     final dir = await _exportsDir();
     final name = outputName ?? p.basenameWithoutExtension(inputPath);
     final ts = DateTime.now().millisecondsSinceEpoch;
-    final outPath = p.join(dir.path, '${name}_trim_$ts.m4a');
+    final outPath = p.join(dir.path, '${name}_trim_$ts${_outputExtFor(inputPath)}');
 
     try {
       await _channel.invokeMethod<void>('trim', {
@@ -46,6 +55,54 @@ class AudioEditorService {
       debugPrint('[audio_editor] trim: ${e.code} — ${e.message}');
       return null;
     }
+  }
+
+  /// Découpe [inputPath] en place : remplace le fichier d'origine par la
+  /// sélection trimmée. Retourne la nouvelle durée (ms) en cas de succès,
+  /// null sinon. Le fichier d'origine est restauré si quelque chose échoue.
+  Future<int?> cropInPlace({
+    required String inputPath,
+    required Duration start,
+    required Duration end,
+  }) async {
+    final src = File(inputPath);
+    if (!await src.exists()) {
+      debugPrint('[audio_editor] cropInPlace: source absente');
+      return null;
+    }
+    final dir = src.parent;
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final ext = _outputExtFor(inputPath);
+    final tmpOut = p.join(dir.path, '.crop_tmp_$ts$ext');
+    final tmpBak = p.join(dir.path, '.crop_bak_$ts$ext');
+
+    try {
+      await _channel.invokeMethod<void>('trim', {
+        'inputPath': inputPath,
+        'startMs': start.inMilliseconds,
+        'endMs': end.inMilliseconds,
+        'outputPath': tmpOut,
+      });
+      // Atomique : on déplace l'original en backup puis on déplace le tmp à sa place.
+      await src.rename(tmpBak);
+      try {
+        await File(tmpOut).rename(inputPath);
+      } catch (e) {
+        // Restauration en cas d'échec du rename final
+        await File(tmpBak).rename(inputPath);
+        rethrow;
+      }
+      await File(tmpBak).delete();
+      return (end - start).inMilliseconds;
+    } on PlatformException catch (e) {
+      debugPrint('[audio_editor] cropInPlace: ${e.code} — ${e.message}');
+    } catch (e) {
+      debugPrint('[audio_editor] cropInPlace: $e');
+    }
+    // Nettoyage en cas d'échec
+    try { final f = File(tmpOut); if (await f.exists()) await f.delete(); } catch (_) {}
+    try { final f = File(tmpBak); if (await f.exists() && !await src.exists()) await f.rename(inputPath); } catch (_) {}
+    return null;
   }
 
   /// Découpe [inputPath] en plusieurs segments aux [timestamps] donnés.

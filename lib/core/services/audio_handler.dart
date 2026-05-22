@@ -58,12 +58,23 @@ class SonLiteAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandle
   @override
   Future<void> seek(Duration position) => _player.seek(position);
 
+  // Recherche d'index robuste : MediaItem.== est basée sur id mais si l'instance
+  // dans la queue diffère de mediaItem.value (rebuild, deserialization), indexOf
+  // peut échouer. On compare explicitement les id.
+  int _indexOfCurrent() {
+    final current = mediaItem.value;
+    if (current == null) return -1;
+    final q = queue.value;
+    for (int i = 0; i < q.length; i++) {
+      if (q[i].id == current.id) return i;
+    }
+    return -1;
+  }
+
   @override
   Future<void> skipToNext() async {
     if (queue.value.isEmpty) return;
-    final currentIndex = mediaItem.value != null
-        ? queue.value.indexOf(mediaItem.value!)
-        : -1;
+    final currentIndex = _indexOfCurrent();
 
     if (_loopMode == AudioLoopMode.oneWithCount) {
       if (_repeatTotal == 0 || _repeatRemaining > 0) {
@@ -96,9 +107,8 @@ class SonLiteAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandle
   @override
   Future<void> skipToPrevious() async {
     if (queue.value.isEmpty) return;
-    final newIndex = (mediaItem.value != null
-        ? queue.value.indexOf(mediaItem.value!) - 1
-        : 0);
+    final currentIndex = _indexOfCurrent();
+    final newIndex = currentIndex >= 0 ? currentIndex - 1 : 0;
     if (newIndex >= 0) {
       await skipToQueueItem(newIndex);
     }
@@ -108,9 +118,24 @@ class SonLiteAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandle
   Future<void> skipToQueueItem(int index) async {
     if (index < 0 || index >= queue.value.length) return;
     final item = queue.value[index];
-    mediaItem.add(item);
-    await _player.setFilePath(item.extras?['filePath'] as String? ?? item.id);
-    await _player.play();
+    final path = item.extras?['filePath'] as String? ?? item.id;
+    try {
+      await _player.setFilePath(path);
+      // mediaItem n'est mis à jour qu'après le succès du chargement : si le
+      // fichier est corrompu/absent, la queue ne se "désynchronise" pas et
+      // l'utilisateur reste sur la piste précédente (qui fonctionne).
+      mediaItem.add(item);
+      await _player.play();
+    } catch (e) {
+      // Lecture impossible : on tente la piste suivante automatiquement, sauf
+      // si on est déjà en boucle (pour éviter un skip infini si tout casse).
+      // ignore: avoid_print
+      print('[audio_handler] setFilePath failed for $path: $e');
+      await _player.stop();
+      if (index + 1 < queue.value.length && index != _indexOfCurrent()) {
+        await skipToQueueItem(index + 1);
+      }
+    }
   }
 
   @override

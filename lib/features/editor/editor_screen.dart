@@ -3,6 +3,9 @@ import 'package:audio_waveforms/audio_waveforms.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'dart:io';
+import 'package:drift/drift.dart' show Value;
+
 import '../../core/database/app_database.dart';
 import '../../core/database/track_repository.dart';
 import '../../core/services/audio_editor_service.dart';
@@ -108,6 +111,77 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     );
   }
 
+  Future<void> _cropOriginal() async {
+    if (!_playerReady) return;
+    final track = _track!;
+    final selDur = _selEnd - _selStart;
+    if (selDur <= Duration.zero) {
+      _showStatus('Sélection vide');
+      return;
+    }
+    // Si la sélection couvre toute la piste, rien à faire
+    if (_selStart == Duration.zero && _selEnd >= _total) {
+      _showStatus('La sélection couvre déjà tout le morceau');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Recadrer l\'original ?'),
+        content: const Text(
+          'Le morceau d\'origine sera remplacé par la sélection.\n'
+          'Cette action est irréversible.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Recadrer'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    // Libérer le fichier source avant le rename (Windows-safe, mais aussi prudent
+    // sur Android pour éviter les ENOENT pendant que le PlayerController le tient).
+    await _waveCtrl.stopPlayer();
+    setState(() {
+      _loading = true;
+      _status = 'Recadrage en cours…';
+    });
+    try {
+      final newDurMs = await ref.read(audioEditorServiceProvider).cropInPlace(
+            inputPath: track.filePath,
+            start: _selStart,
+            end: _selEnd,
+          );
+      if (newDurMs == null) {
+        _showStatus('Erreur — recadrage échoué');
+      } else {
+        // Mettre à jour la durée en base + invalider le cache d'image du fichier
+        await ref.read(tracksDaoProvider).updateTrack(
+              track.toCompanion(false).copyWith(durationMs: Value(newDurMs)),
+            );
+        if (track.thumbnailPath != null) {
+          PaintingBinding.instance.imageCache
+              .evict(FileImage(File(track.thumbnailPath!)));
+        }
+        ref.invalidate(trackRepositoryProvider);
+        if (!mounted) return;
+        // Reload track + recharger la waveform sur le fichier mis à jour
+        await _loadTrack();
+        if (mounted) _showStatus('Morceau recadré');
+      }
+    } catch (e) {
+      _showStatus('Erreur : $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
   Future<void> _extractRegion(String name) async {
     final track = _track!;
     await _waveCtrl.pausePlayer();
@@ -126,12 +200,12 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
         await ref.read(importServiceProvider).importFromPath(outPath);
         _showStatus('« $name » ajouté à la bibliothèque');
       } else {
-        _showStatus('Erreur FFmpeg — export échoué');
+        _showStatus('Erreur — export échoué');
       }
     } catch (e) {
       _showStatus('Erreur : $e');
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -231,13 +305,21 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
 
         const Divider(height: 1),
 
-        // ── Bouton principal ──────────────────────────────────────────────
+        // ── Boutons d'action ──────────────────────────────────────────────
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
           child: FilledButton.icon(
             icon: const Icon(Icons.file_copy_outlined),
             label: const Text('Créer une copie de la sélection'),
             onPressed: _playerReady && !_loading ? _createCopy : null,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.crop_outlined),
+            label: const Text('Recadrer le morceau original'),
+            onPressed: _playerReady && !_loading ? _cropOriginal : null,
           ),
         ),
       ],
