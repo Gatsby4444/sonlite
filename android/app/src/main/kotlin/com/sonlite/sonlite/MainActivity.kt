@@ -159,13 +159,34 @@ class MainActivity : AudioServiceFragmentActivity() {
     // ── Helpers FFmpeg ────────────────────────────────────────────────────────
 
     private fun findFfmpegBin(): File? {
+        val candidates = listOfNotNull(
+            applicationContext.noBackupFilesDir,
+            applicationContext.filesDir,
+        )
+        // Chemin "classique" prioritaire
+        for (root in candidates) {
+            val primary = File(root, "packages/ffmpeg/bin/ffmpeg")
+            if (primary.exists()) {
+                Log.i(TAG, "ffmpeg : trouvé à ${primary.absolutePath}")
+                return primary
+            }
+        }
+        // Recherche récursive — on accepte aussi les noms variantes des nouvelles
+        // versions de youtubedl-android (libffmpeg.zso.so, etc.).
+        val nameRegex = Regex("(?:lib)?ffmpeg(?:\\.zso\\.so)?")
+        for (root in candidates) {
+            if (!root.exists()) continue
+            root.walk().forEach {
+                if (it.isFile && nameRegex.matches(it.name) && it.canExecute()) {
+                    Log.i(TAG, "ffmpeg : trouvé à ${it.absolutePath} (recherche)")
+                    return it
+                }
+            }
+        }
+        // Dump du contenu noBackup/packages pour aider au diagnostic
         val noBackup = applicationContext.noBackupFilesDir
-        val primary = File(noBackup, "packages/ffmpeg/bin/ffmpeg")
-        if (primary.exists()) return primary
-        // Fallback : recherche récursive dans le dossier packages
-        File(noBackup, "packages").walk()
-            .find { it.name == "ffmpeg" && it.canExecute() }
-            ?.let { return it }
+        Log.w(TAG, "ffmpeg : introuvable. Listing noBackupFilesDir :")
+        noBackup.walk().take(40).forEach { Log.w(TAG, "  ${it.absolutePath}") }
         return null
     }
 
@@ -244,9 +265,10 @@ class MainActivity : AudioServiceFragmentActivity() {
     }
 
     /// Stratégie en cascade :
-    ///   1. MP3 (header 0xFFE ou ID3) → MP3FrameTrimmer pur Kotlin
-    ///   2. AAC/M4A (MIME audio/mp4a-latm) → MediaMuxer MP4
-    ///   3. Tout le reste → FFmpeg en stream-copy
+    ///   1. MP3 (ID3 ou frame sync 0xFFE) → Mp3FrameTrimmer pur Kotlin
+    ///   2. AAC/M4A → MediaMuxer MP4 output
+    ///   3. OPUS/Vorbis/OGG → MediaMuxer OGG output (API 29+)
+    ///   4. Reste : on tente MediaMuxer en devinant le conteneur, puis FFmpeg
     /// Renvoie une map décrivant la méthode utilisée pour les logs côté Flutter.
     private fun trimAudio(inputPath: String, startMs: Long, endMs: Long, outputPath: String): Map<String, Any?> {
         val mime = probeAudioMime(inputPath)
@@ -260,15 +282,42 @@ class MainActivity : AudioServiceFragmentActivity() {
             return mapOf("method" to "mp3_frames", "framesCopied" to frames, "mime" to mime)
         }
 
-        // 2. AAC/M4A
+        // 2. AAC dans MP4/M4A
         if (mime == "audio/mp4a-latm" || mime == "audio/aac" || ext == "m4a" || ext == "aac") {
-            Log.i(TAG, "audio_editor trim → MediaMuxer (MP4)")
-            trimAudioMuxer(inputPath, startMs, endMs, outputPath)
-            return mapOf("method" to "media_muxer", "mime" to mime)
+            Log.i(TAG, "audio_editor trim → MediaMuxer MP4")
+            trimAudioMuxer(inputPath, startMs, endMs, outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            return mapOf("method" to "media_muxer_mp4", "mime" to mime)
         }
 
-        // 3. FFmpeg fallback
-        Log.i(TAG, "audio_editor trim → FFmpeg -c copy (fallback)")
+        // 3. OPUS / Vorbis dans OGG (Android 10+ requis)
+        val isOggLike = mime == "audio/opus" || mime == "audio/vorbis" ||
+                        ext == "opus" || ext == "ogg" || ext == "webm"
+        if (isOggLike && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            Log.i(TAG, "audio_editor trim → MediaMuxer OGG")
+            trimAudioMuxer(inputPath, startMs, endMs, outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_OGG)
+            return mapOf("method" to "media_muxer_ogg", "mime" to mime)
+        }
+
+        // 4. Tentative MediaMuxer (MP4) générique avec capture d'erreur, puis OGG
+        try {
+            Log.i(TAG, "audio_editor trim → MediaMuxer MP4 (générique)")
+            trimAudioMuxer(inputPath, startMs, endMs, outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            return mapOf("method" to "media_muxer_mp4_fallback", "mime" to mime)
+        } catch (e: Throwable) {
+            Log.w(TAG, "MediaMuxer MP4 a échoué : ${e.message}")
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            try {
+                Log.i(TAG, "audio_editor trim → MediaMuxer OGG (fallback)")
+                trimAudioMuxer(inputPath, startMs, endMs, outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_OGG)
+                return mapOf("method" to "media_muxer_ogg_fallback", "mime" to mime)
+            } catch (e: Throwable) {
+                Log.w(TAG, "MediaMuxer OGG a échoué : ${e.message}")
+            }
+        }
+
+        // 5. FFmpeg en dernier recours
+        Log.i(TAG, "audio_editor trim → FFmpeg -c copy (dernier recours)")
         trimAudioFfmpeg(inputPath, startMs, endMs, outputPath)
         return mapOf("method" to "ffmpeg_copy", "mime" to mime)
     }
@@ -286,14 +335,14 @@ class MainActivity : AudioServiceFragmentActivity() {
         } catch (_: Throwable) { false }
     }
 
-    private fun trimAudioMuxer(inputPath: String, startMs: Long, endMs: Long, outputPath: String) {
+    private fun trimAudioMuxer(inputPath: String, startMs: Long, endMs: Long, outputPath: String, outFormat: Int) {
         val extractor = MediaExtractor()
         var muxer: MediaMuxer? = null
         try {
             extractor.setDataSource(inputPath)
             val format = extractor.getTrackFormat(selectAudioTrack(extractor))
 
-            muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            muxer = MediaMuxer(outputPath, outFormat)
             val muxTrack = muxer.addTrack(format)
             extractor.seekTo(startMs * 1_000L, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
             muxer.start()

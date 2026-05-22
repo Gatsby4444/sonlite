@@ -121,6 +121,13 @@ class AudioEditorService {
     appLog('cropInPlace ${start.inMilliseconds}ms..${end.inMilliseconds}ms',
         source: 'editor');
 
+    final info = await probe(inputPath);
+    if (info != null) {
+      appLog('source : ext=${info['ext']} mime=${info['mime']} '
+          'size=${info['size']}o header=${info['header']}',
+          source: 'editor');
+    }
+
     final dir = src.parent;
     final ts = DateTime.now().millisecondsSinceEpoch;
     final ext = _outputExtFor(inputPath);

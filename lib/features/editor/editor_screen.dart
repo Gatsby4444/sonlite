@@ -309,6 +309,48 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
           ),
         ),
 
+        // ── Ajustement précis ─────────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+          child: Column(
+            children: [
+              _FineAdjustRow(
+                label: 'Début',
+                value: _selStart,
+                color: cs.primary,
+                onChange: (delta) {
+                  final next = _selStart + delta;
+                  final clamped = Duration(
+                    milliseconds: next.inMilliseconds.clamp(
+                      0,
+                      (_selEnd.inMilliseconds - 50).clamp(0, 1 << 31),
+                    ),
+                  );
+                  setState(() => _selStart = clamped);
+                  _waveCtrl.seekTo(clamped.inMilliseconds);
+                },
+              ),
+              const SizedBox(height: 4),
+              _FineAdjustRow(
+                label: 'Fin',
+                value: _selEnd,
+                color: cs.primary,
+                onChange: (delta) {
+                  final next = _selEnd + delta;
+                  final clamped = Duration(
+                    milliseconds: next.inMilliseconds.clamp(
+                      _selStart.inMilliseconds + 50,
+                      _total.inMilliseconds,
+                    ),
+                  );
+                  setState(() => _selEnd = clamped);
+                  _waveCtrl.seekTo(clamped.inMilliseconds);
+                },
+              ),
+            ],
+          ),
+        ),
+
         const Divider(height: 1),
 
         // ── Boutons d'action ──────────────────────────────────────────────
@@ -413,6 +455,99 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Ajustement fin d'un marqueur ────────────────────────────────────────────
+
+class _FineAdjustRow extends StatelessWidget {
+  final String label;
+  final Duration value;
+  final Color color;
+  final ValueChanged<Duration> onChange;
+
+  const _FineAdjustRow({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.onChange,
+  });
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    final cs = (d.inMilliseconds.remainder(1000) ~/ 10).toString().padLeft(2, '0');
+    return '$m:$s.$cs';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        SizedBox(
+          width: 38,
+          child: Text(
+            label,
+            style: TextStyle(
+              color: cs.onSurfaceVariant,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        _StepButton(label: '-1s',   onTap: () => onChange(const Duration(seconds: -1))),
+        _StepButton(label: '-.1',   onTap: () => onChange(const Duration(milliseconds: -100))),
+        _StepButton(label: '-10',   onTap: () => onChange(const Duration(milliseconds: -10))),
+        Expanded(
+          child: Center(
+            child: Text(
+              _fmt(value),
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        ),
+        _StepButton(label: '+10',   onTap: () => onChange(const Duration(milliseconds: 10))),
+        _StepButton(label: '+.1',   onTap: () => onChange(const Duration(milliseconds: 100))),
+        _StepButton(label: '+1s',   onTap: () => onChange(const Duration(seconds: 1))),
+      ],
+    );
+  }
+}
+
+class _StepButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  const _StepButton({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return InkResponse(
+      onTap: onTap,
+      radius: 22,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 1),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: cs.onSurface,
+            fontSize: 11,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
         ),
       ),
     );

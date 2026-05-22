@@ -34,7 +34,7 @@ Future<void> main() async {
     ],
   );
 
-  appLog('app start (1.0.16)', source: 'main');
+  appLog('app start (1.0.17)', source: 'main');
   container.read(startupServiceProvider).run();
   // Nettoyage des doublons de filePath laissés par les versions ≤ 1.0.13.
   // Sans ça, le bug "swipe bloqué" persiste sur les anciennes pistes.
