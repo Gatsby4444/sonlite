@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
 
@@ -107,12 +106,17 @@ class SonLiteAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandle
 
     final newIndex = currentIndex + 1;
     if (newIndex >= queue.value.length) {
+      // En shuffle : on re-mélange la bibliothèque pour un second tour qui
+      // n'aura pas exactement le même ordre. En mode normal : on revient
+      // au début comme avant.
+      if (_shuffleEnabled && _originalQueue.isNotEmpty) {
+        appLog('shuffle : fin de tournée → re-mélange', source: 'audio');
+        queue.add(_buildShuffledOrder());
+      }
       await skipToQueueItem(0);
-      _maybeExtendShuffleQueue(0);
       return;
     }
     await skipToQueueItem(newIndex);
-    _maybeExtendShuffleQueue(newIndex);
   }
 
   @override
@@ -146,12 +150,20 @@ class SonLiteAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandle
   @override
   Future<void> addQueueItems(List<MediaItem> mediaItems) async {
     queue.add([...queue.value, ...mediaItems]);
+    if (_shuffleEnabled) _originalQueue = [..._originalQueue, ...mediaItems];
   }
 
   @override
   Future<void> updateQueue(List<MediaItem> queue) async {
     _originalQueue = List.from(queue);
-    this.queue.add(queue);
+    // Si le shuffle est actif, on re-mélange la nouvelle queue immédiatement
+    // sinon shuffle resterait actif "fantôme" et le user n'aurait qu'un
+    // play séquentiel sans le savoir.
+    if (_shuffleEnabled) {
+      this.queue.add(_buildShuffledOrder());
+    } else {
+      this.queue.add(queue);
+    }
   }
 
   // Cycle 4 états : off → ×1 → ×2 → infini → off
@@ -177,63 +189,46 @@ class SonLiteAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandle
   }
 
   Future<void> setShuffle(bool enabled) async {
+    // Idempotent : re-appeler avec la même valeur n'écrase pas _originalQueue.
+    // Évite un bug subtil où setShuffle(true) ré-appelé alors que la queue est
+    // déjà mélangée réduisait le pool à la mini-queue active.
+    if (_shuffleEnabled == enabled) return;
     _shuffleEnabled = enabled;
     _shuffleController.add(enabled);
+
     if (enabled) {
       _originalQueue = List.from(queue.value);
-      final current = mediaItem.value;
-      final excludeIds = {if (current != null) current.id};
-
-      // Pre-pick 3 upcoming tracks (pondéré par récence)
-      final upcoming = <MediaItem>[];
-      final poolSize = _originalQueue.length - 1;
-      for (int i = 0; i < 3 && i < poolSize; i++) {
-        final pick = _pickWeightedRandom(
-          excludeIds: {...excludeIds, ...upcoming.map((e) => e.id)},
-        );
-        upcoming.add(pick);
-      }
-      queue.add([?current, ...upcoming]);
+      appLog('shuffle ON — pool de ${_originalQueue.length} pistes',
+          source: 'audio');
+      queue.add(_buildShuffledOrder());
     } else {
       final current = mediaItem.value;
+      appLog('shuffle OFF — retour à l\'ordre original', source: 'audio');
       queue.add(_originalQueue);
+      // mediaItem.add() n'a aucun effet si l'instance n'a pas changé : pas
+      // besoin de le ré-émettre ici, l'index est recalculé à la volée.
       if (current != null) {
         final idx = _originalQueue.indexOf(current);
-        if (idx >= 0) mediaItem.add(current);
+        if (idx < 0) {
+          // Le morceau courant n'est plus dans la queue d'origine → on
+          // démarre depuis le début pour éviter un état incohérent.
+          unawaited(skipToQueueItem(0));
+        }
       }
     }
   }
 
-  // Sélection aléatoire pondérée : les morceaux récents ont moins de chances
-  MediaItem _pickWeightedRandom({Set<String> excludeIds = const {}}) {
-    final candidates = _originalQueue
-        .where((item) => !excludeIds.contains(item.id))
-        .toList();
-
-    final pool = candidates.isNotEmpty ? candidates : _originalQueue;
-
-    // Position depuis la fin de la queue → plus c'est récent, plus c'est bas
-    final posFromEnd = <String, int>{};
-    final q = queue.value;
-    for (int i = 0; i < q.length; i++) {
-      posFromEnd[q[i].id] = q.length - 1 - i;
-    }
-
-    final weights = pool.map((item) {
-      final pos = posFromEnd[item.id];
-      if (pos == null) return 1.0; // jamais joué récemment → poids max
-      // pos=0 (le plus récent) → poids ~0.05 ; pos=9 → ~0.55
-      final factor = (pos + 1) / (q.length + 1);
-      return 0.05 + factor * 0.95;
-    }).toList();
-
-    final total = weights.fold(0.0, (a, b) => a + b);
-    var point = Random().nextDouble() * total;
-    for (int i = 0; i < pool.length; i++) {
-      point -= weights[i];
-      if (point <= 0) return pool[i];
-    }
-    return pool.last;
+  /// Construit une queue contenant TOUTE la bibliothèque mélangée, en plaçant
+  /// la piste courante en tête (index 0). C'est ce que font Spotify / Apple
+  /// Music : pas de mini-fenêtre de 3 pistes, pas de loop à 5 morceaux.
+  List<MediaItem> _buildShuffledOrder() {
+    final current = mediaItem.value;
+    final currentTid = current?.extras?['trackId'];
+    final others = _originalQueue
+        .where((m) => m.extras?['trackId'] != currentTid)
+        .toList()
+      ..shuffle();
+    return [?current, ...others];
   }
 
   void setLoopConfig(AudioLoopMode mode, {int count = 0, bool stopAfter = false}) {
@@ -243,17 +238,6 @@ class SonLiteAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandle
     _stopAfterLoop = stopAfter;
     _loopModeController.add(_loopMode);
     _loopStateController.add(_currentLoopState());
-  }
-
-  // Maintient ≥ 3 pistes à l'avance : ajoute 1 track à la fois
-  void _maybeExtendShuffleQueue(int currentIndex) {
-    if (!_shuffleEnabled || _originalQueue.isEmpty) return;
-    final ahead = queue.value.length - currentIndex - 1;
-    if (ahead >= 3) return;
-    // Exclure les tracks déjà dans la look-ahead window
-    final aheadIds =
-        queue.value.sublist(currentIndex + 1).map((e) => e.id).toSet();
-    queue.add([...queue.value, _pickWeightedRandom(excludeIds: aheadIds)]);
   }
 
   AudioPlayer get player => _player;
