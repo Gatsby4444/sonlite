@@ -200,22 +200,9 @@ class _ImageSheet extends ConsumerWidget {
                 style: Theme.of(context).textTheme.titleMedium),
           ),
           ListTile(
-            leading: const Icon(Icons.photo_library_outlined),
-            title: const Text('Galerie'),
-            onTap: () async {
-              final notifier = ref.read(trackRepositoryProvider.notifier);
-              final trackId = track.id;
-              Navigator.pop(context);
-              final path = await ImageService.pickCropAndSave();
-              if (path != null) {
-                await notifier.updateThumbnail(trackId, path);
-                onChanged();
-              }
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.folder_outlined),
-            title: const Text('Fichiers'),
+            leading: const Icon(Icons.image_outlined),
+            title: const Text('Choisir une image'),
+            subtitle: const Text('Galerie, photos, fichiers…'),
             onTap: () async {
               final notifier = ref.read(trackRepositoryProvider.notifier);
               final trackId = track.id;

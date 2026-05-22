@@ -15,7 +15,7 @@ import '../../features/player/providers/player_expansion_provider.dart';
 import '../player/unified_player_sheet.dart';
 import '../shared/track_art.dart';
 
-enum _ImageSource { gallery, files, remove }
+enum _ImageSource { files, remove }
 
 // ─── Écran liste des playlists ────────────────────────────────────────────────
 
@@ -75,7 +75,7 @@ class PlaylistsScreen extends ConsumerWidget {
             children: [
               GestureDetector(
                 onTap: () async {
-                  final path = await ImageService.pickCropAndSave();
+                  final path = await ImageService.pickCropAndSaveFromFiles();
                   if (path != null) setDialogState(() => imagePath = path);
                 },
                 child: ClipRRect(
@@ -247,13 +247,9 @@ class _EditPlaylistSheetState extends ConsumerState<_EditPlaylistSheet> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Galerie'),
-              onTap: () => Navigator.pop(context, _ImageSource.gallery),
-            ),
-            ListTile(
-              leading: const Icon(Icons.folder_outlined),
-              title: const Text('Fichiers'),
+              leading: const Icon(Icons.image_outlined),
+              title: const Text('Choisir une image'),
+              subtitle: const Text('Galerie, photos, fichiers…'),
               onTap: () => Navigator.pop(context, _ImageSource.files),
             ),
             if ((_newImagePath ?? widget.playlist.thumbnailPath) != null &&
@@ -275,9 +271,7 @@ class _EditPlaylistSheetState extends ConsumerState<_EditPlaylistSheet> {
       });
       return;
     }
-    final path = choice == _ImageSource.gallery
-        ? await ImageService.pickCropAndSave()
-        : await ImageService.pickCropAndSaveFromFiles();
+    final path = await ImageService.pickCropAndSaveFromFiles();
     if (path != null) {
       setState(() {
         _newImagePath = path;

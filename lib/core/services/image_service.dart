@@ -1,20 +1,12 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 class ImageService {
-  /// Ouvre la galerie photo système (Google Photos, etc.)
-  static Future<String?> pickCropAndSave() async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
-    if (picked == null) return null;
-    return _cropAndSave(picked.path);
-  }
-
-  /// Ouvre le gestionnaire de fichiers pour choisir n'importe quel fichier image
+  /// Ouvre le sélecteur système (galerie, photos, fichiers, etc.) puis le recadrage.
   static Future<String?> pickCropAndSaveFromFiles() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.image,

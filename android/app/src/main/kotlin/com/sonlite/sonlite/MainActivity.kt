@@ -74,11 +74,15 @@ class MainActivity : AudioServiceFragmentActivity() {
                         val outputPath = call.argument<String>("outputPath")!!
                         Thread {
                             try {
-                                trimAudio(inputPath, startMs, endMs, outputPath)
-                                mainHandler.post { result.success(null) }
+                                val report = trimAudio(inputPath, startMs, endMs, outputPath)
+                                mainHandler.post { result.success(report) }
                             } catch (e: Throwable) {
                                 Log.e(TAG, "audio_editor trim: ÉCHEC", e)
-                                mainHandler.post { result.error("TRIM_ERROR", e.message, null) }
+                                val details = buildString {
+                                    appendLine("${e.javaClass.simpleName}: ${e.message}")
+                                    e.stackTrace.take(4).forEach { appendLine("  at $it") }
+                                }
+                                mainHandler.post { result.error("TRIM_ERROR", e.message, details) }
                             }
                         }.start()
                     }
@@ -97,7 +101,18 @@ class MainActivity : AudioServiceFragmentActivity() {
                                 mainHandler.post { result.success(null) }
                             } catch (e: Throwable) {
                                 Log.e(TAG, "audio_editor split: ÉCHEC", e)
-                                mainHandler.post { result.error("SPLIT_ERROR", e.message, null) }
+                                mainHandler.post { result.error("SPLIT_ERROR", e.message, e.stackTraceToString()) }
+                            }
+                        }.start()
+                    }
+                    "probe" -> {
+                        val inputPath = call.argument<String>("inputPath")!!
+                        Thread {
+                            try {
+                                val info = probeFile(inputPath)
+                                mainHandler.post { result.success(info) }
+                            } catch (e: Throwable) {
+                                mainHandler.post { result.error("PROBE_ERROR", e.message, null) }
                             }
                         }.start()
                     }
@@ -208,15 +223,67 @@ class MainActivity : AudioServiceFragmentActivity() {
         }
     }
 
-    /// MediaMuxer (MP4) ne supporte que AAC. Pour MP3/OPUS/OGG/FLAC/etc.
-    /// on repasse par FFmpeg en stream-copy (rapide, pas de réencodage).
-    private fun trimAudio(inputPath: String, startMs: Long, endMs: Long, outputPath: String) {
+    /// Retourne des infos diagnostiques sur le fichier (taille, MIME, extension, en-tête).
+    private fun probeFile(inputPath: String): Map<String, Any?> {
+        val f = File(inputPath)
         val mime = probeAudioMime(inputPath)
-        if (mime == "audio/mp4a-latm" || mime == "audio/aac") {
-            trimAudioMuxer(inputPath, startMs, endMs, outputPath)
-        } else {
-            trimAudioFfmpeg(inputPath, startMs, endMs, outputPath)
+        val ext = inputPath.substringAfterLast('.', "").lowercase()
+        val headerHex = try {
+            val bytes = ByteArray(16)
+            java.io.FileInputStream(f).use { it.read(bytes) }
+            bytes.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+        } catch (e: Throwable) { "lecture impossible: ${e.message}" }
+        return mapOf(
+            "path" to inputPath,
+            "exists" to f.exists(),
+            "size" to f.length(),
+            "ext" to ext,
+            "mime" to mime,
+            "header" to headerHex,
+        )
+    }
+
+    /// Stratégie en cascade :
+    ///   1. MP3 (header 0xFFE ou ID3) → MP3FrameTrimmer pur Kotlin
+    ///   2. AAC/M4A (MIME audio/mp4a-latm) → MediaMuxer MP4
+    ///   3. Tout le reste → FFmpeg en stream-copy
+    /// Renvoie une map décrivant la méthode utilisée pour les logs côté Flutter.
+    private fun trimAudio(inputPath: String, startMs: Long, endMs: Long, outputPath: String): Map<String, Any?> {
+        val mime = probeAudioMime(inputPath)
+        val ext = inputPath.substringAfterLast('.', "").lowercase()
+        Log.i(TAG, "audio_editor trim : mime=$mime ext=$ext start=${startMs}ms end=${endMs}ms")
+
+        // 1. MP3
+        if (ext == "mp3" || mime == "audio/mpeg" || mime == "audio/mp3" || looksLikeMp3(inputPath)) {
+            Log.i(TAG, "audio_editor trim → MP3 frame trimmer")
+            val frames = Mp3FrameTrimmer.trim(inputPath, startMs, endMs, outputPath)
+            return mapOf("method" to "mp3_frames", "framesCopied" to frames, "mime" to mime)
         }
+
+        // 2. AAC/M4A
+        if (mime == "audio/mp4a-latm" || mime == "audio/aac" || ext == "m4a" || ext == "aac") {
+            Log.i(TAG, "audio_editor trim → MediaMuxer (MP4)")
+            trimAudioMuxer(inputPath, startMs, endMs, outputPath)
+            return mapOf("method" to "media_muxer", "mime" to mime)
+        }
+
+        // 3. FFmpeg fallback
+        Log.i(TAG, "audio_editor trim → FFmpeg -c copy (fallback)")
+        trimAudioFfmpeg(inputPath, startMs, endMs, outputPath)
+        return mapOf("method" to "ffmpeg_copy", "mime" to mime)
+    }
+
+    /// Signature MP3 : ID3 ou frame sync 0xFFE en début de fichier.
+    private fun looksLikeMp3(inputPath: String): Boolean {
+        return try {
+            val b = ByteArray(3)
+            java.io.FileInputStream(inputPath).use { it.read(b) }
+            // "ID3" tag
+            if (b[0] == 'I'.code.toByte() && b[1] == 'D'.code.toByte() && b[2] == '3'.code.toByte()) return true
+            // Frame sync 0xFFE
+            val w = ((b[0].toInt() and 0xFF) shl 8) or (b[1].toInt() and 0xFF)
+            (w and 0xFFE0) == 0xFFE0
+        } catch (_: Throwable) { false }
     }
 
     private fun trimAudioMuxer(inputPath: String, startMs: Long, endMs: Long, outputPath: String) {

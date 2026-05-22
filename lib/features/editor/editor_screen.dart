@@ -10,6 +10,7 @@ import '../../core/database/app_database.dart';
 import '../../core/database/track_repository.dart';
 import '../../core/services/audio_editor_service.dart';
 import '../../core/services/import_service.dart';
+import '../../core/services/log_service.dart';
 import 'widgets/audio_timeline.dart';
 
 class EditorScreen extends ConsumerStatefulWidget {
@@ -159,7 +160,9 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
             end: _selEnd,
           );
       if (newDurMs == null) {
-        _showStatus('Erreur — recadrage échoué');
+        appLog('crop UI : échec — voir lignes précédentes',
+            level: LogLevel.warn, source: 'editor');
+        _showStatus('Erreur — recadrage échoué (voir Paramètres → Logs)');
       } else {
         // Mettre à jour la durée en base + invalider le cache d'image du fichier
         await ref.read(tracksDaoProvider).updateTrack(
@@ -198,9 +201,12 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
           );
       if (outPath != null) {
         await ref.read(importServiceProvider).importFromPath(outPath);
+        appLog('export OK : $name', source: 'editor');
         _showStatus('« $name » ajouté à la bibliothèque');
       } else {
-        _showStatus('Erreur — export échoué');
+        appLog('export UI : échec — voir lignes précédentes',
+            level: LogLevel.warn, source: 'editor');
+        _showStatus('Erreur — export échoué (voir Paramètres → Logs)');
       }
     } catch (e) {
       _showStatus('Erreur : $e');
