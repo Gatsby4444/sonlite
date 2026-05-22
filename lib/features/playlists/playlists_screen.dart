@@ -4,7 +4,6 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../core/database/app_database.dart';
 import '../../core/database/playlists_dao.dart';
@@ -16,14 +15,7 @@ import '../../features/player/providers/player_expansion_provider.dart';
 import '../player/unified_player_sheet.dart';
 import '../shared/track_art.dart';
 
-part 'playlists_screen.g.dart';
-
 enum _ImageSource { gallery, files, remove }
-
-@riverpod
-Future<List<PlaylistTrackEntry>> playlistTracks(Ref ref, int playlistId) {
-  return ref.watch(playlistRepositoryProvider.notifier).getTracksForPlaylist(playlistId);
-}
 
 // ─── Écran liste des playlists ────────────────────────────────────────────────
 
@@ -455,10 +447,14 @@ class _PlaylistDetailScreenState
         ),
     ];
 
-    return Stack(
-      children: [
-        Scaffold(
-      body: NestedScrollView(
+    return PopScope(
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) ref.read(playerExpandedProvider.notifier).state = false;
+      },
+      child: Stack(
+        children: [
+          Scaffold(
+        body: NestedScrollView(
         headerSliverBuilder: (_, innerBoxIsScrolled) => [
           SliverAppBar(
             expandedHeight: hasImage ? 200.0 : null,
@@ -499,7 +495,7 @@ class _PlaylistDetailScreenState
                     child: Text('Aucun titre dans cette playlist'))
                 : ReorderableListView.builder(
                     itemCount: tracks.length,
-                    onReorder: _settingsMode ? (_, __) {} : _reorder,
+                    onReorder: _settingsMode ? (_, _) {} : _reorder,
                     buildDefaultDragHandles: !_settingsMode,
                     itemBuilder: (_, i) {
                       final entry = tracks[i];
@@ -516,8 +512,9 @@ class _PlaylistDetailScreenState
                   ),
       ),
         ),
-        const UnifiedPlayerSheet(navBarOffset: 0),
-      ],
+          const UnifiedPlayerSheet(navBarOffset: 0),
+        ],
+      ),
     );
   }
 
@@ -665,14 +662,8 @@ class _PlaylistTrackTile extends ConsumerWidget {
             child: ClipRect(
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 1.2, sigmaY: 1.2),
-                child: Opacity(opacity: 0.0, child: Container()),
+                child: const SizedBox.expand(),
               ),
-            ),
-          ),
-          Positioned.fill(
-            child: IgnorePointer(
-              ignoring: !settingsMode,
-              child: Opacity(opacity: 0.0, child: Container()),
             ),
           ),
         ],

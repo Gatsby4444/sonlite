@@ -23,7 +23,7 @@ final tracksDaoProvider = Provider<TracksDao>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef TracksDaoRef = ProviderRef<TracksDao>;
-String _$trackRepositoryHash() => r'2de06b42568547b8d3e97372f520ea9c0874d925';
+String _$trackRepositoryHash() => r'2b49b57d89f410805709a88a3c9cfe596b906654';
 
 /// See also [TrackRepository].
 @ProviderFor(TrackRepository)

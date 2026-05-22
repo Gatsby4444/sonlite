@@ -24,7 +24,7 @@ final playlistsDaoProvider = Provider<PlaylistsDao>.internal(
 // ignore: unused_element
 typedef PlaylistsDaoRef = ProviderRef<PlaylistsDao>;
 String _$playlistRepositoryHash() =>
-    r'80878ae803503626a14692015071da3f601b4dea';
+    r'6e2ff8f056089aa5d2f1678da57464cff83c08c6';
 
 /// See also [PlaylistRepository].
 @ProviderFor(PlaylistRepository)

@@ -1,5 +1,9 @@
 package com.sonlite.sonlite
 
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMuxer
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -10,6 +14,8 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
+import java.nio.ByteBuffer
 
 class MainActivity : AudioServiceFragmentActivity() {
 
@@ -58,6 +64,68 @@ class MainActivity : AudioServiceFragmentActivity() {
                 }
             }
 
+        MethodChannel(messenger, "com.sonlite/audio_editor")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "trim" -> {
+                        val inputPath = call.argument<String>("inputPath")!!
+                        val startMs   = (call.argument<Number>("startMs")!!).toLong()
+                        val endMs     = (call.argument<Number>("endMs")!!).toLong()
+                        val outputPath = call.argument<String>("outputPath")!!
+                        Thread {
+                            try {
+                                trimAudio(inputPath, startMs, endMs, outputPath)
+                                mainHandler.post { result.success(null) }
+                            } catch (e: Throwable) {
+                                Log.e(TAG, "audio_editor trim: ÉCHEC", e)
+                                mainHandler.post { result.error("TRIM_ERROR", e.message, null) }
+                            }
+                        }.start()
+                    }
+                    "split" -> {
+                        val inputPath = call.argument<String>("inputPath")!!
+                        @Suppress("UNCHECKED_CAST")
+                        val segments = call.argument<List<Map<String, Any>>>("segments")!!
+                        Thread {
+                            try {
+                                for (seg in segments) {
+                                    val startMs    = (seg["startMs"] as Number).toLong()
+                                    val endMs      = (seg["endMs"] as Number).toLong()
+                                    val outputPath = seg["outputPath"] as String
+                                    trimAudio(inputPath, startMs, endMs, outputPath)
+                                }
+                                mainHandler.post { result.success(null) }
+                            } catch (e: Throwable) {
+                                Log.e(TAG, "audio_editor split: ÉCHEC", e)
+                                mainHandler.post { result.error("SPLIT_ERROR", e.message, null) }
+                            }
+                        }.start()
+                    }
+                    "toMp3" -> {
+                        val inputPath  = call.argument<String>("inputPath")!!
+                        val outputPath = call.argument<String>("outputPath")!!
+                        Thread {
+                            try {
+                                ensureInitialized()
+                                val bin = findFfmpegBin()
+                                    ?: throw IllegalStateException("Binaire FFmpeg introuvable — init() a peut-être échoué")
+                                runFfmpegBin(bin, listOf(
+                                    "-i", inputPath,
+                                    "-acodec", "libmp3lame",
+                                    "-q:a", "2",
+                                    "-y", outputPath,
+                                ))
+                                mainHandler.post { result.success(null) }
+                            } catch (e: Throwable) {
+                                Log.e(TAG, "audio_editor toMp3: ÉCHEC", e)
+                                mainHandler.post { result.error("MP3_ERROR", e.message, null) }
+                            }
+                        }.start()
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         MethodChannel(messenger, "com.sonlite/ytdlp")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -73,23 +141,86 @@ class MainActivity : AudioServiceFragmentActivity() {
             }
     }
 
-    /// Exécute le binaire FFmpeg extrait par youtubedl-android.
-    /// Le chemin d'extraction de FFmpeg.init() est {noBackupFilesDir}/packages/ffmpeg/bin/ffmpeg.
-    private fun runFFmpeg(args: List<String>): Int {
-        val noBackup = applicationContext.getNoBackupFilesDir()
-        val ffmpegBin = java.io.File(noBackup, "packages/ffmpeg/bin/ffmpeg")
-        if (!ffmpegBin.exists()) {
-            throw IllegalStateException("FFmpeg binary not found at ${ffmpegBin.absolutePath} — init() may have failed")
-        }
-        val nativeLibDir = applicationInfo.nativeLibraryDir
-        val cmd = listOf(ffmpegBin.absolutePath) + args
+    // ── Helpers FFmpeg ────────────────────────────────────────────────────────
+
+    private fun findFfmpegBin(): File? {
+        val noBackup = applicationContext.noBackupFilesDir
+        val primary = File(noBackup, "packages/ffmpeg/bin/ffmpeg")
+        if (primary.exists()) return primary
+        // Fallback : recherche récursive dans le dossier packages
+        File(noBackup, "packages").walk()
+            .find { it.name == "ffmpeg" && it.canExecute() }
+            ?.let { return it }
+        return null
+    }
+
+    private fun runFfmpegBin(bin: File, args: List<String>): Int {
+        val cmd = listOf(bin.absolutePath) + args
         Log.d(TAG, "ffmpeg: ${cmd.joinToString(" ")}")
+        val stderr = StringBuilder()
         val process = ProcessBuilder(cmd)
             .redirectErrorStream(true)
-            .apply { environment()["LD_LIBRARY_PATH"] = nativeLibDir }
+            .apply { environment()["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir }
             .start()
-        process.inputStream.bufferedReader().forEachLine { Log.d(TAG, "ffmpeg: $it") }
-        return process.waitFor()
+        process.inputStream.bufferedReader().forEachLine {
+            Log.d(TAG, "ffmpeg: $it")
+            stderr.appendLine(it)
+        }
+        val rc = process.waitFor()
+        if (rc != 0) throw RuntimeException("FFmpeg a échoué (rc=$rc)\n${stderr.take(400)}")
+        return rc
+    }
+
+    /// Compatibilité : canal com.sonlite/ffmpeg (conservé mais non utilisé par l'éditeur).
+    private fun runFFmpeg(args: List<String>): Int {
+        val bin = findFfmpegBin()
+            ?: throw IllegalStateException("Binaire FFmpeg introuvable")
+        return runFfmpegBin(bin, args)
+    }
+
+    // ── Helpers MediaExtractor / MediaMuxer ───────────────────────────────────
+
+    private fun selectAudioTrack(extractor: MediaExtractor): Int {
+        for (i in 0 until extractor.trackCount) {
+            val mime = extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME) ?: continue
+            if (mime.startsWith("audio/")) {
+                extractor.selectTrack(i)
+                return i
+            }
+        }
+        throw IllegalArgumentException("Aucune piste audio trouvée dans le fichier")
+    }
+
+    private fun trimAudio(inputPath: String, startMs: Long, endMs: Long, outputPath: String) {
+        val extractor = MediaExtractor()
+        extractor.setDataSource(inputPath)
+        val format = extractor.getTrackFormat(selectAudioTrack(extractor))
+
+        val muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        val muxTrack = muxer.addTrack(format)
+        extractor.seekTo(startMs * 1_000L, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+        muxer.start()
+
+        val buf = ByteBuffer.allocate(1 * 1024 * 1024)
+        val info = MediaCodec.BufferInfo()
+
+        while (true) {
+            info.size = extractor.readSampleData(buf, 0)
+            if (info.size < 0) break
+            val sampleUs = extractor.sampleTime
+            if (sampleUs > endMs * 1_000L) break
+            if (sampleUs >= startMs * 1_000L) {
+                info.offset = 0
+                info.presentationTimeUs = sampleUs - startMs * 1_000L
+                info.flags = extractor.sampleFlags
+                muxer.writeSampleData(muxTrack, buf, info)
+            }
+            extractor.advance()
+        }
+
+        muxer.stop()
+        muxer.release()
+        extractor.release()
     }
 
     /// Initialise yt-dlp + ffmpeg (extrait le runtime Python au premier appel).

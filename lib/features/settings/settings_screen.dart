@@ -54,7 +54,7 @@ class SettingsScreen extends ConsumerWidget {
             itemCount: _palette.length,
             itemBuilder: (context, i) {
               final opt = _palette[i];
-              final isSelected = current.value == opt.color.value;
+              final isSelected = current.toARGB32() == opt.color.toARGB32();
               return _ColorChip(
                 option: opt,
                 selected: isSelected,

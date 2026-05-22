@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/painting.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -30,12 +33,20 @@ class TrackRepository extends _$TrackRepository {
     return ref.read(tracksDaoProvider).getTrackById(id);
   }
 
-  Future<void> updateThumbnail(int id, String? thumbnailPath) {
-    return ref.read(tracksDaoProvider).updateThumbnail(id, thumbnailPath);
+  Future<void> updateThumbnail(int id, String? thumbnailPath) async {
+    final old = await ref.read(tracksDaoProvider).getTrackById(id);
+    if (old?.thumbnailPath != null) {
+      PaintingBinding.instance.imageCache.evict(FileImage(File(old!.thumbnailPath!)));
+    }
+    await ref.read(tracksDaoProvider).updateThumbnail(id, thumbnailPath);
   }
 
-  Future<void> restoreOriginalThumbnail(int id, String? originalPath) {
-    return ref.read(tracksDaoProvider).restoreOriginalThumbnail(id, originalPath);
+  Future<void> restoreOriginalThumbnail(int id, String? originalPath) async {
+    final old = await ref.read(tracksDaoProvider).getTrackById(id);
+    if (old?.thumbnailPath != null) {
+      PaintingBinding.instance.imageCache.evict(FileImage(File(old!.thumbnailPath!)));
+    }
+    await ref.read(tracksDaoProvider).restoreOriginalThumbnail(id, originalPath);
   }
 
   Future<List<Track>> searchTracks(String query) {

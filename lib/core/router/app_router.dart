@@ -115,8 +115,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       }
     }
 
-    final item = ref.watch(currentMediaItemProvider).valueOrNull; // ignore: unused_local_variable
-    final hasPlayer = item != null;
+    final hasPlayer = ref.watch(currentMediaItemProvider).valueOrNull != null;
 
     return Stack(
       children: [
@@ -157,6 +156,7 @@ class _AppShellState extends ConsumerState<AppShell> {
                   )
                   .then((_) {
                 _animating = false;
+                // ignore: use_build_context_synchronously
                 if (mounted) context.go(_routes[i]);
               });
             },

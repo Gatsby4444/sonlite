@@ -47,3 +47,9 @@ app.*.map.json
 # Keystore de production — ne jamais commiter
 *.jks
 *.keystore
+
+# Sortie graphify (cache local, pas versionné)
+graphify-out/
+
+# APK générés à la racine pour les releases
+*.apk

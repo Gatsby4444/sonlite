@@ -85,7 +85,8 @@ class SonLiteAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandle
 
     final newIndex = currentIndex + 1;
     if (newIndex >= queue.value.length) {
-      await skipToQueueItem(0); // toujours revenir au début (bibliothèque et playlists)
+      await skipToQueueItem(0);
+      _maybeExtendShuffleQueue(0);
       return;
     }
     await skipToQueueItem(newIndex);

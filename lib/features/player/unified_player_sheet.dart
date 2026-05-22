@@ -39,6 +39,7 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
 
   // 1 = piste suivante entre depuis la droite, -1 = précédente depuis la gauche
   int _swipeDirection = 1;
+  bool _isDragging = false;
 
   @override
   void initState() {
@@ -100,20 +101,18 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
   // ── Swipe horizontal artwork (Apple Music parallaxe) ─────────────────────────
 
   void _onArtworkDragUpdate(DragUpdateDetails d) {
+    _isDragging = true;
     final artW = (MediaQuery.sizeOf(context).width - 64).clamp(200.0, 320.0);
-    // + d.delta.dx : l'artwork suit le doigt dans le même sens
-    // dx < 0 (doigt vers gauche) → value diminue vers -1 → artwork sort à gauche
-    // dx > 0 (doigt vers droite) → value monte vers +1  → artwork sort à droite
     _swipeCtrl.value =
         (_swipeCtrl.value + d.delta.dx / artW).clamp(-1.0, 1.0);
   }
 
   void _onArtworkDragEnd(DragEndDetails d, SonLiteAudioHandler handler) {
+    _isDragging = false;
     final vx = d.velocity.pixelsPerSecond.dx;
     final v = _swipeCtrl.value;
 
     if (vx < -500 || v < -0.35) {
-      // Swipe gauche → artwork sort à gauche → piste suivante
       setState(() => _swipeDirection = 1);
       _swipeCtrl
           .animateTo(-1.0,
@@ -121,12 +120,13 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
               curve: Curves.easeIn)
           .then((_) {
         handler.skipToNext();
-        // Snap au centre : nouvelle piste apparaît directement en place,
-        // sans animation d'entrée parasite (évite l'effet rollback)
-        _swipeCtrl.value = 0.0;
+        // TickerFuture.then() se déclenche aussi si l'animation est interrompue
+        // par un nouveau drag (qui appelle .value= directement). On ne remet
+        // à zéro que si aucun drag n'est en cours, sinon l'artwork snappe
+        // à 0 pendant que le doigt est encore sur l'écran.
+        if (mounted && !_isDragging) _swipeCtrl.value = 0.0;
       });
     } else if (vx > 500 || v > 0.35) {
-      // Swipe droite → artwork sort à droite → piste précédente
       setState(() => _swipeDirection = -1);
       _swipeCtrl
           .animateTo(1.0,
@@ -134,10 +134,9 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
               curve: Curves.easeIn)
           .then((_) {
         handler.skipToPrevious();
-        _swipeCtrl.value = 0.0;
+        if (mounted && !_isDragging) _swipeCtrl.value = 0.0;
       });
     } else {
-      // Spring-back sans rebond
       _swipeCtrl.animateTo(0.0,
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic);
@@ -151,8 +150,12 @@ class _UnifiedPlayerSheetState extends ConsumerState<UnifiedPlayerSheet>
     ref.listen<bool>(playerExpandedProvider, (_, expanded) {
       if (expanded && _expandCtrl.value < 0.99) {
         _expandCtrl.animateTo(1.0, curve: Curves.easeOutCubic);
-      } else if (!expanded && _expandCtrl.value > 0.01) {
-        _expandCtrl.animateTo(0.0, curve: Curves.easeInCubic);
+      } else if (!expanded) {
+        // Toujours annuler toute animation en attente (y compris si le ticker
+        // était suspendu par TickerMode pendant qu'une route était au-dessus).
+        // Sans stop(), animateTo(1.0) paused peut reprendre au retour arrière.
+        _expandCtrl.stop();
+        _expandCtrl.value = 0.0;
       }
     });
 
@@ -710,7 +713,7 @@ class _ArtImage extends StatelessWidget {
         width: size,
         height: size,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _placeholder(context),
+        errorBuilder: (_, _, _) => _placeholder(context),
       );
     }
     return _placeholder(context);

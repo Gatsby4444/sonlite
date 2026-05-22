@@ -6,12 +6,12 @@ const _kColorKey = 'theme_seed_color';
 const _kDefaultColor = 0xFF6750A4;
 
 class ThemeColorNotifier extends StateNotifier<Color> {
-  ThemeColorNotifier(Color initial) : super(initial);
+  ThemeColorNotifier(super.initial);
 
   Future<void> setColor(Color color) async {
     state = color;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_kColorKey, color.value);
+    await prefs.setInt(_kColorKey, color.toARGB32());
   }
 }
 

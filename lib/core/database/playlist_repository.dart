@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/painting.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -49,8 +52,15 @@ class PlaylistRepository extends _$PlaylistRepository {
     return ref.read(playlistsDaoProvider).setTrackEnabled(playlistId, trackId, enabled);
   }
 
-  Future<void> updatePlaylist(int id, String name, {String? thumbnailPath}) {
-    return ref.read(playlistsDaoProvider).updatePlaylist(
+  Future<void> updatePlaylist(int id, String name, {String? thumbnailPath}) async {
+    Playlist? old;
+    for (final p in state.valueOrNull ?? const []) {
+      if (p.id == id) { old = p; break; }
+    }
+    if (old?.thumbnailPath != null) {
+      PaintingBinding.instance.imageCache.evict(FileImage(File(old!.thumbnailPath!)));
+    }
+    await ref.read(playlistsDaoProvider).updatePlaylist(
           PlaylistsCompanion(
             id: Value(id),
             name: Value(name),

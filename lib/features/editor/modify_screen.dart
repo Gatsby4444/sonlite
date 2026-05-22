@@ -63,6 +63,7 @@ class _ModifyScreenState extends ConsumerState<ModifyScreen> {
       if (!mounted) return;
       ref.invalidate(trackRepositoryProvider);
       await _loadTrack();
+      if (!mounted) return;
       setState(() => _saving = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Sauvegardé')),

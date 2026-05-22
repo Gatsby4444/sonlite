@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/app_database.dart';
 import '../../core/database/track_repository.dart';
-import '../../core/services/ffmpeg_service.dart';
+import '../../core/services/audio_editor_service.dart';
 import '../../core/services/import_service.dart';
 import 'widgets/audio_timeline.dart';
 
@@ -78,8 +78,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
         if (mounted) _playheadNotifier.value = ms;
       }, cancelOnError: true);
       if (mounted) setState(() => _playerReady = true);
-      // Pre-warm FFmpeg en arrière-plan pour éviter le délai au premier trim
-      unawaited(ref.read(ffmpegServiceProvider).preWarm());
     } catch (_) {}
   }
 
@@ -115,10 +113,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     await _waveCtrl.pausePlayer();
     setState(() {
       _loading = true;
-      _status = 'Traitement FFmpeg en cours…';
+      _status = 'Découpe en cours…';
     });
     try {
-      final outPath = await ref.read(ffmpegServiceProvider).trim(
+      final outPath = await ref.read(audioEditorServiceProvider).trim(
             inputPath: track.filePath,
             start: _selStart,
             end: _selEnd,
